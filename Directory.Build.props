@@ -1,0 +1,16 @@
+<Project>
+
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <NeutralLanguage>zh-Hans</NeutralLanguage>
+    <Product>PhiEdit Enhanced Pro</Product>
+    <Company>PhiEdit Enhanced Pro Project</Company>
+    <Copyright>Copyright (c) PhiEdit Enhanced Pro Project</Copyright>
+    <Version>0.1.0</Version>
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
+  </PropertyGroup>
+
+</Project>

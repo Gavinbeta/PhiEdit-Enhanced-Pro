@@ -1,0 +1,102 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Dark">
+            <SolidColorBrush x:Key="AppBackgroundBrush" Color="#FF151517" />
+            <SolidColorBrush x:Key="SurfaceBrush" Color="#FF1E1E21" />
+            <SolidColorBrush x:Key="SurfaceAltBrush" Color="#FF26262A" />
+            <SolidColorBrush x:Key="ElevatedBrush" Color="#FF2E2E33" />
+            <SolidColorBrush x:Key="StrokeBrush" Color="#FF3A3A40" />
+            <SolidColorBrush x:Key="TextPrimaryBrush" Color="#FFF2F2F4" />
+            <SolidColorBrush x:Key="TextSecondaryBrush" Color="#FFA6A6AE" />
+            <SolidColorBrush x:Key="AccentBrush" Color="#FF4CC2FF" />
+            <SolidColorBrush x:Key="AccentSoftBrush" Color="#334CC2FF" />
+            <SolidColorBrush x:Key="DangerBrush" Color="#FFFF6B6B" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Light">
+            <SolidColorBrush x:Key="AppBackgroundBrush" Color="#FFF3F3F6" />
+            <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFAFAFC" />
+            <SolidColorBrush x:Key="SurfaceAltBrush" Color="#FFF0F0F4" />
+            <SolidColorBrush x:Key="ElevatedBrush" Color="#FFFFFFFF" />
+            <SolidColorBrush x:Key="StrokeBrush" Color="#FFDCDCE4" />
+            <SolidColorBrush x:Key="TextPrimaryBrush" Color="#FF16161A" />
+            <SolidColorBrush x:Key="TextSecondaryBrush" Color="#FF5E5E68" />
+            <SolidColorBrush x:Key="AccentBrush" Color="#FF0067C0" />
+            <SolidColorBrush x:Key="AccentSoftBrush" Color="#330067C0" />
+            <SolidColorBrush x:Key="DangerBrush" Color="#FFC42B1C" />
+        </ResourceDictionary>
+    </ResourceDictionary.ThemeDictionaries>
+
+    <x:Double x:Key="ToolbarButtonSize">32</x:Double>
+
+    <Style x:Key="ToolbarButtonStyle" TargetType="Button">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Width" Value="32" />
+        <Setter Property="Height" Value="32" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Foreground" Value="{ThemeResource TextPrimaryBrush}" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="ToolbarTextButtonStyle" TargetType="Button" BasedOn="{StaticResource ToolbarButtonStyle}">
+        <Setter Property="Width" Value="Auto" />
+        <Setter Property="Padding" Value="10,0" />
+        <Setter Property="FontSize" Value="13" />
+    </Style>
+
+    <Style x:Key="ToolbarToggleStyle" TargetType="ToggleButton">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Width" Value="32" />
+        <Setter Property="Height" Value="32" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Foreground" Value="{ThemeResource TextPrimaryBrush}" />
+    </Style>
+
+    <Style x:Key="PanelCardStyle" TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource SurfaceAltBrush}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource StrokeBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="12" />
+    </Style>
+
+    <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{ThemeResource TextPrimaryBrush}" />
+        <Setter Property="Margin" Value="0,0,0,8" />
+    </Style>
+
+    <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{ThemeResource TextSecondaryBrush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Margin" Value="0,0,8,0" />
+    </Style>
+
+    <Style x:Key="InspectorTabStyle" TargetType="ToggleButton">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Padding" Value="12,6" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Foreground" Value="{ThemeResource TextSecondaryBrush}" />
+        <Setter Property="Margin" Value="0,0,4,0" />
+    </Style>
+
+    <Style x:Key="StatusTextStyle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{ThemeResource TextSecondaryBrush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+</ResourceDictionary>

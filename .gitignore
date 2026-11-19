@@ -1,0 +1,19 @@
+## 构建产物
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+*.user
+*.suo
+*.userprefs
+.vs/
+.vscode/
+*.binlog
+
+## 参考源码（第三方 PolyForm 授权，仅供逻辑参考，不纳入本仓库版本管理）
+/reference/
+
+## 本地数据与缓存
+*.local.json
+*.log

@@ -1,0 +1,293 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Window x:Class="PhiEdit.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="using:PhiEdit.App.Controls"
+        Title="PhiEdit Enhanced Pro">
+
+    <Grid x:Name="RootLayout"
+          Background="{ThemeResource AppBackgroundBrush}"
+          RowDefinitions="Auto,Auto,*,Auto">
+
+        <!-- 标题栏 -->
+        <Grid x:Name="TitleBarHost" Grid.Row="0" Height="44" Background="Transparent">
+            <Grid ColumnDefinitions="Auto,*,Auto" Margin="16,0,16,0">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="10">
+                    <Border Width="22" Height="22" CornerRadius="5" Background="{ThemeResource AccentBrush}">
+                        <TextBlock Text="P" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   FontWeight="Bold" FontSize="13" Foreground="#FF10131A" />
+                    </Border>
+                    <TextBlock Text="PhiEdit Enhanced Pro" FontWeight="SemiBold" FontSize="14"
+                               Foreground="{ThemeResource TextPrimaryBrush}" VerticalAlignment="Center" />
+                </StackPanel>
+                <TextBlock x:Name="DocumentTitle" Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center"
+                           FontSize="13" Foreground="{ThemeResource TextSecondaryBrush}" Text="未命名" />
+                <TextBlock x:Name="BuildVersion" Grid.Column="2" VerticalAlignment="Center" FontSize="12"
+                           Foreground="{ThemeResource TextSecondaryBrush}" Text="v0.1.0" />
+            </Grid>
+        </Grid>
+
+        <!-- 工具栏 -->
+        <Border Grid.Row="1" Background="{ThemeResource SurfaceBrush}" BorderBrush="{ThemeResource StrokeBrush}"
+                BorderThickness="0,1,0,1">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                          HorizontalScrollMode="Enabled" VerticalScrollMode="Disabled">
+                <StackPanel Orientation="Horizontal" Padding="10,6" Spacing="2">
+                    <Button x:Name="NewButton" Style="{StaticResource ToolbarButtonStyle}" Click="OnNewClick"
+                            ToolTipService.ToolTip="新建谱面">
+                        <FontIcon Glyph="&#xE710;" FontSize="16" />
+                    </Button>
+                    <Button x:Name="OpenButton" Style="{StaticResource ToolbarButtonStyle}" Click="OnOpenClick"
+                            ToolTipService.ToolTip="打开谱面 (Ctrl+O)">
+                        <FontIcon Glyph="&#xE8E5;" FontSize="16" />
+                    </Button>
+                    <Button x:Name="SaveButton" Style="{StaticResource ToolbarButtonStyle}" Click="OnSaveClick"
+                            ToolTipService.ToolTip="保存谱面 (Ctrl+S)">
+                        <FontIcon Glyph="&#xE74E;" FontSize="16" />
+                    </Button>
+                    <Button x:Name="ExportButton" Style="{StaticResource ToolbarButtonStyle}" Click="OnExportClick"
+                            ToolTipService.ToolTip="导出谱面">
+                        <FontIcon Glyph="&#xE896;" FontSize="16" />
+                    </Button>
+
+                    <Rectangle Width="1" Height="20" Margin="8,0" Fill="{ThemeResource StrokeBrush}" />
+
+                    <Button x:Name="UndoButton" Style="{StaticResource ToolbarButtonStyle}" Click="OnUndoClick"
+                            ToolTipService.ToolTip="撤销 (Ctrl+Z)">
+                        <FontIcon Glyph="&#xE7A7;" FontSize="16" />
+                    </Button>
+                    <Button x:Name="RedoButton" Style="{StaticResource ToolbarButtonStyle}" Click="OnRedoClick"
+                            ToolTipService.ToolTip="重做 (Ctrl+Y)">
+                        <FontIcon Glyph="&#xE895;" FontSize="16" />
+                    </Button>
+
+                    <Rectangle Width="1" Height="20" Margin="8,0" Fill="{ThemeResource StrokeBrush}" />
+
+                    <ToggleButton x:Name="SelectToolButton" Style="{StaticResource ToolbarToggleStyle}"
+                                  Click="OnToolClick" Tag="select" IsChecked="True"
+                                  ToolTipService.ToolTip="选择 / 移动 (V)">
+                        <FontIcon Glyph="&#xE762;" FontSize="16" />
+                    </ToggleButton>
+                    <ToggleButton x:Name="TapToolButton" Style="{StaticResource ToolbarToggleStyle}"
+                                  Click="OnToolClick" Tag="tap" ToolTipService.ToolTip="放置 Tap (Q)">
+                        <TextBlock Text="Tap" FontSize="12" />
+                    </ToggleButton>
+                    <ToggleButton x:Name="DragToolButton" Style="{StaticResource ToolbarToggleStyle}"
+                                  Click="OnToolClick" Tag="drag" ToolTipService.ToolTip="放置 Drag (R)">
+                        <TextBlock Text="Drag" FontSize="12" />
+                    </ToggleButton>
+                    <ToggleButton x:Name="FlickToolButton" Style="{StaticResource ToolbarToggleStyle}"
+                                  Click="OnToolClick" Tag="flick" ToolTipService.ToolTip="放置 Flick (E)">
+                        <TextBlock Text="Flick" FontSize="12" />
+                    </ToggleButton>
+                    <ToggleButton x:Name="HoldToolButton" Style="{StaticResource ToolbarToggleStyle}"
+                                  Click="OnToolClick" Tag="hold" ToolTipService.ToolTip="放置 Hold (W)">
+                        <TextBlock Text="Hold" FontSize="12" />
+                    </ToggleButton>
+
+                    <Rectangle Width="1" Height="20" Margin="8,0" Fill="{ThemeResource StrokeBrush}" />
+
+                    <Button x:Name="PlayButton" Style="{StaticResource ToolbarButtonStyle}" Click="OnPlayClick"
+                            ToolTipService.ToolTip="播放 / 暂停 (空格)">
+                        <FontIcon x:Name="PlayGlyph" Glyph="&#xE768;" FontSize="16" />
+                    </Button>
+                    <Button x:Name="StopButton" Style="{StaticResource ToolbarButtonStyle}" Click="OnStopClick"
+                            ToolTipService.ToolTip="回到开头">
+                        <FontIcon Glyph="&#xE71A;" FontSize="16" />
+                    </Button>
+
+                    <Rectangle Width="1" Height="20" Margin="8,0" Fill="{ThemeResource StrokeBrush}" />
+
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <TextBlock Text="判定线" Style="{StaticResource StatusTextStyle}" />
+                        <ComboBox x:Name="LineSelector" MinWidth="130" SelectionChanged="OnLineSelectionChanged" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="10,0,0,0">
+                        <TextBlock Text="每拍细分数" Style="{StaticResource StatusTextStyle}" />
+                        <NumberBox x:Name="DivisionBox" Width="76" Minimum="1" Maximum="32" SpinButtonPlacementMode="Compact"
+                                   ValueChanged="OnDivisionChanged" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="10,0,0,0">
+                        <TextBlock Text="竖线数" Style="{StaticResource StatusTextStyle}" />
+                        <NumberBox x:Name="GridCountBox" Width="76" Minimum="2" Maximum="101" SpinButtonPlacementMode="Compact"
+                                   ValueChanged="OnGridCountChanged" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="10,0,0,0">
+                        <TextBlock Text="吸附竖线" Style="{StaticResource StatusTextStyle}" />
+                        <ToggleSwitch x:Name="SnapToggle" IsOn="True" MinWidth="40" Toggled="OnSnapToggled" />
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <!-- 主体：左侧编辑区（音符区 + 判定线区，从正中间分开），右侧属性面板 -->
+        <Grid x:Name="WorkspaceArea" Grid.Row="2" ColumnDefinitions="*,Auto,360">
+
+            <Grid x:Name="EditorArea" Grid.Column="0" ColumnDefinitions="*,Auto,*" SizeChanged="OnEditorAreaSizeChanged">
+                <Border Grid.Column="0" BorderBrush="{ThemeResource StrokeBrush}" BorderThickness="0,0,1,0">
+                    <Grid RowDefinitions="Auto,*">
+                        <Border Grid.Row="0" Background="{ThemeResource SurfaceAltBrush}" Padding="12,6">
+                            <TextBlock Text="音符区 — 当前判定线上的音符" FontSize="12"
+                                       Foreground="{ThemeResource TextSecondaryBrush}" />
+                        </Border>
+                        <controls:NoteSurface x:Name="NoteSurface" Grid.Row="1" />
+                    </Grid>
+                </Border>
+
+                <controls:ThinSplitter Grid.Column="1" x:Name="EditorSplitter" />
+
+                <Border Grid.Column="2" BorderBrush="{ThemeResource StrokeBrush}" BorderThickness="1,0,0,0">
+                    <Grid RowDefinitions="Auto,*">
+                        <Border Grid.Row="0" Background="{ThemeResource SurfaceAltBrush}" Padding="12,6">
+                            <TextBlock Text="判定线区 — 判定线行为控制" FontSize="12"
+                                       Foreground="{ThemeResource TextSecondaryBrush}" />
+                        </Border>
+                        <controls:EventSurface x:Name="EventSurface" Grid.Row="1" />
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <controls:ThinSplitter Grid.Column="1" x:Name="InspectorSplitter" />
+
+            <Border Grid.Column="2" Background="{ThemeResource SurfaceBrush}" BorderBrush="{ThemeResource StrokeBrush}"
+                    BorderThickness="1,0,0,0">
+                <Grid RowDefinitions="Auto,*">
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Padding="8,8,8,4">
+                        <ToggleButton x:Name="TabNotes" Style="{StaticResource InspectorTabStyle}" Click="OnTabClick"
+                                      Tag="notes" IsChecked="True" Content="音符" />
+                        <ToggleButton x:Name="TabEvents" Style="{StaticResource InspectorTabStyle}" Click="OnTabClick"
+                                      Tag="events" Content="事件" />
+                        <ToggleButton x:Name="TabLines" Style="{StaticResource InspectorTabStyle}" Click="OnTabClick"
+                                      Tag="lines" Content="判定线" />
+                        <ToggleButton x:Name="TabChart" Style="{StaticResource InspectorTabStyle}" Click="OnTabClick"
+                                      Tag="chart" Content="谱面" />
+                    </StackPanel>
+
+                    <Grid Grid.Row="1">
+                        <!-- 音符属性 -->
+                        <StackPanel x:Name="NotesPanel" Padding="14" Spacing="10">
+                            <TextBlock Text="音符属性" Style="{StaticResource SectionTitleStyle}" />
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="类型" Style="{StaticResource FieldLabelStyle}" />
+                                <ComboBox x:Name="NoteTypeBox" HorizontalAlignment="Stretch"
+                                          SelectionChanged="OnNoteTypeChanged">
+                                    <ComboBoxItem Content="Tap" Tag="1" />
+                                    <ComboBoxItem Content="Hold" Tag="2" />
+                                    <ComboBoxItem Content="Flick" Tag="3" />
+                                    <ComboBoxItem Content="Drag" Tag="4" />
+                                </ComboBox>
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="起始拍" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox x:Name="NoteStartBeatBox" PlaceholderText="整数:分子/分母"
+                                         IsReadOnly="True" />
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="结束拍" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox x:Name="NoteEndBeatBox" PlaceholderText="整数:分子/分母"
+                                         IsReadOnly="True" />
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="横坐标 X" Style="{StaticResource FieldLabelStyle}" />
+                                <NumberBox x:Name="NotePositionXBox" SpinButtonPlacementMode="Compact"
+                                           ValueChanged="OnNotePositionXChanged" />
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="纵坐标 Y" Style="{StaticResource FieldLabelStyle}" />
+                                <NumberBox x:Name="NotePositionYBox" SpinButtonPlacementMode="Compact"
+                                           ValueChanged="OnNotePositionYChanged" />
+                            </StackPanel>
+                            <Button x:Name="DeleteNoteButton" Content="删除音符" HorizontalAlignment="Stretch"
+                                    Style="{StaticResource AccentButtonStyle}" Click="OnDeleteNoteClick" />
+                        </StackPanel>
+
+                        <!-- 事件属性 -->
+                        <StackPanel x:Name="EventsPanel" Padding="14" Spacing="10" Visibility="Collapsed">
+                            <TextBlock Text="事件属性" Style="{StaticResource SectionTitleStyle}" />
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="轨道" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox x:Name="EventTrackBox" IsReadOnly="True" />
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="起始拍" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox x:Name="EventStartBeatBox" IsReadOnly="True" />
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="结束拍" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox x:Name="EventEndBeatBox" IsReadOnly="True" />
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="起始值" Style="{StaticResource FieldLabelStyle}" />
+                                <NumberBox x:Name="EventStartValueBox" SpinButtonPlacementMode="Compact"
+                                           ValueChanged="OnEventValueChanged" />
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="结束值" Style="{StaticResource FieldLabelStyle}" />
+                                <NumberBox x:Name="EventEndValueBox" SpinButtonPlacementMode="Compact"
+                                           ValueChanged="OnEventValueChanged" />
+                            </StackPanel>
+                            <Button x:Name="DeleteEventButton" Content="删除事件" HorizontalAlignment="Stretch"
+                                    Style="{StaticResource AccentButtonStyle}" Click="OnDeleteEventClick" />
+                        </StackPanel>
+
+                        <!-- 判定线列表 -->
+                        <Grid x:Name="LinesPanel" Padding="14" Visibility="Collapsed" RowDefinitions="Auto,*,Auto">
+                            <TextBlock Grid.Row="0" Text="判定线列表" Style="{StaticResource SectionTitleStyle}" />
+                            <ListView x:Name="LineList" Grid.Row="1" SelectionMode="Single"
+                                      SelectionChanged="OnLineListSelectionChanged" />
+                            <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" Margin="0,10,0,0">
+                                <Button Content="新增判定线" Click="OnAddLineClick" />
+                                <Button Content="删除判定线" Click="OnRemoveLineClick" />
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- 谱面信息 -->
+                        <StackPanel x:Name="ChartPanel" Padding="14" Spacing="10" Visibility="Collapsed">
+                            <TextBlock Text="谱面信息" Style="{StaticResource SectionTitleStyle}" />
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="歌曲名" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox x:Name="SongNameBox" />
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="艺术家" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox x:Name="SongArtistBox" />
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="谱面名" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox x:Name="ChartNameBox" />
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="难度" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox x:Name="DifficultyBox" />
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="基础 BPM" Style="{StaticResource FieldLabelStyle}" />
+                                <NumberBox x:Name="BpmBox" Minimum="1" Maximum="999" SpinButtonPlacementMode="Compact"
+                                           ValueChanged="OnBpmChanged" />
+                            </StackPanel>
+                            <TextBlock Text="速度表" Style="{StaticResource SectionTitleStyle}" Margin="0,8,0,0" />
+                            <ListView x:Name="BpmList" Height="150" SelectionMode="Single" />
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- 底栏 -->
+        <Border Grid.Row="3" Background="{ThemeResource SurfaceBrush}" BorderBrush="{ThemeResource StrokeBrush}"
+                BorderThickness="0,1,0,0">
+            <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" Padding="16,6" MinHeight="38">
+                <TextBlock x:Name="TimeReadout" Grid.Column="0" Style="{StaticResource StatusTextStyle}"
+                           Text="0.00s / 0.00s" />
+                <TextBlock x:Name="BeatReadout" Grid.Column="1" Style="{StaticResource StatusTextStyle}"
+                           Margin="18,0,0,0" Text="拍 0.00" />
+                <Slider x:Name="Scrubber" Grid.Column="2" Margin="24,0,24,0" VerticalAlignment="Center"
+                        Minimum="0" Maximum="1" StepFrequency="0.001" />
+                <TextBlock x:Name="BpmReadout" Grid.Column="3" Style="{StaticResource StatusTextStyle}"
+                           Text="120 BPM" />
+                <TextBlock x:Name="StatusReadout" Grid.Column="4" Style="{StaticResource StatusTextStyle}"
+                           Margin="18,0,0,0" Text="就绪" />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

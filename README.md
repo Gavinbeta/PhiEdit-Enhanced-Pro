@@ -1,0 +1,93 @@
+# PhiEdit Enhanced Pro
+
+基于 [Re:PhiEdit Next](https://github.com/kclg-YSJ/rpe-next)（PolyForm-Noncommercial-1.0.0）的**逻辑**重新实现的 Phigros 制谱器。
+新程序完全抛弃原有 Electron/浏览器内核，改用 **C# + WinUI 3 (Windows App SDK)** 构建原生 Windows 桌面应用。
+
+- 目标平台：Windows 10 1809 及以上 / Windows 11（x64 为主，保留 x86 / ARM64）
+- 不使用任何浏览器套壳，不依赖 WebView2、Chromium 或 Node 运行时
+- 界面为 Fluent 风格，全中文文案，不含 Emoji（图标统一使用 Segoe Fluent Icons 字形）
+- 原始素材（曲绘、音效、噪域皮肤、Shader）仍以 RPE/PEZ 资源形式兼容
+
+> 参考源码放在 `reference/`（已从 Git 版本管理中排除）。该目录仅用于**逻辑参考**，
+> 其中的 JavaScript 代码不会被编译进新程序，也不会被复制到 `src/`。
+
+---
+
+## 目录结构
+
+```
+PhiEdit-Enhanced-Pro/
+├─ PhiEdit.sln                    解决方案
+├─ Directory.Build.props          全局编译属性
+├─ docs/
+│  ├─ ARCHITECTURE.md             架构说明
+│  └─ FEATURE-PARITY.md           与原版的功能对照表
+├─ reference/                     原始 RPE Next 源码（仅参考，不入库）
+└─ src/
+   ├─ PhiEdit.Core/               领域模型与编辑逻辑（纯 .NET，不含 UI 依赖）
+   ├─ PhiEdit.App/                WinUI 3 应用层
+   └─ PhiEdit.Core.Tests/         核心逻辑单元测试
+```
+
+## 构建与运行
+
+本机环境（已验证）：
+
+| 组件 | 版本 |
+| --- | --- |
+| .NET SDK | 10.0.403（目标框架 net8.0） |
+| Windows App SDK | 1.8.260209005 |
+| Win2D (`Microsoft.Graphics.Win2D`) | 1.4.0 |
+| Visual Studio | 2026 (18.x) Community |
+
+```powershell
+# 还原与构建
+dotnet build PhiEdit.sln -c Debug
+
+# 运行
+dotnet run --project src/PhiEdit.App/PhiEdit.App.csproj
+
+# 单元测试
+dotnet test src/PhiEdit.Core.Tests/PhiEdit.Core.Tests.csproj
+```
+
+> **注意**：Windows App SDK 的 XAML 编译器在控制台代码页非 UTF-8 时会静默失败。
+> 如果在 cmd/PowerShell 里看到 `MSB3073 ... XamlCompiler.exe 已退出，代码为 1` 且没有任何错误信息，
+> 先执行 `chcp 65001` 再构建即可。仓库提供了 `build.cmd` 自动完成该设置。
+> Visual Studio 内部构建不受此影响。
+
+## 界面结构
+
+主窗口从正中间分成两个编辑区，与原版 RPE 的编辑观感一致：
+
+```
+┌──────────────── 标题栏 ────────────────┐
+├──────────────── 工具栏 ─────────────────┤
+│ 音符区（当前判定线的音符）│ 判定线区（判定线行为控制）│ 属性面板 │
+├──────────────── 底栏（时间 / 拍 / 进度）─┤
+└────────────────────────────────────────┘
+```
+
+### 网格绘制规则（与原版一致）
+
+- **整拍线**：红色、加粗，右侧标注拍号。
+- **横线（时间细分）**：黄色细线，数量由「每拍细分数」决定——相邻两根整拍线之间的细线数即为几分之几拍。
+- **竖线（音符横坐标网格）**：黄色细线，数量可调；**竖线数量为奇数时，居中的那条竖线会被加粗**。
+- 判定线：跟随播放头的白色横线。
+
+## 当前阶段已实现的功能
+
+- 音符区：单击放置音符（Tap / Drag / Flick / Hold）、单击选中、拖动移动、按细分线与竖线吸附
+- 判定线区：按轨道（X 移动 / Y 移动 / 旋转 / 透明度 / 速度）分栏展示事件，双击新建事件，拖动改时间
+- 属性面板：音符属性、事件属性、判定线列表、谱面信息与 BPM
+- 播放时钟：空格播放/暂停，底栏进度条拖动定位，播放头自动跟随滚动
+- 撤销 / 重做（Ctrl+Z / Ctrl+Y）、删除（Delete）
+- RPE JSON 谱面的读写与打开 / 保存 / 导出
+- 可扩展点：`IEditorExtension` / `IChartSerializer` / `IToolProvider`
+
+后续功能规划见 [docs/FEATURE-PARITY.md](docs/FEATURE-PARITY.md)。
+
+## 许可
+
+本仓库代码遵循与衍生项目一致的 **PolyForm-Noncommercial-1.0.0** 许可。
+`reference/` 下的原始源码版权归原作者所有，未纳入版本管理。

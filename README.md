@@ -60,6 +60,8 @@ dotnet test src/PhiEdit.Core.Tests/PhiEdit.Core.Tests.csproj
 
 主窗口从正中间分成两个编辑区，与原版 RPE 的编辑观感一致：
 
+![首次运行界面](docs/images/editor-first-run.png)
+
 ```
 ┌──────────────── 标题栏 ────────────────┐
 ├──────────────── 工具栏 ─────────────────┤

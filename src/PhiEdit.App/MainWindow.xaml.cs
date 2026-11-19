@@ -53,8 +53,8 @@ public sealed partial class MainWindow : Window
 
         NoteSurface.SelectionChanged += (_, _) => RefreshInspector();
         EventSurface.SelectionChanged += (_, _) => RefreshInspector();
-        NoteSurface.ViewChanged += (_, _) => RefreshTimeline();
-        EventSurface.ViewChanged += (_, _) => RefreshTimeline();
+        NoteSurface.ViewChanged += (_, _) => OnViewChanged();
+        EventSurface.ViewChanged += (_, _) => OnViewChanged();
         Scrubber.ValueChanged += (sender, args) => OnScrubberChanged(sender, args);
         EditorSplitter.Dragged += (_, delta) => ApplyEditorSplit(delta);
         InspectorSplitter.Dragged += (_, delta) => ApplyInspectorSplit(delta);
@@ -118,6 +118,7 @@ public sealed partial class MainWindow : Window
         _session.Undo.Clear();
         document.IsDirty = false;
         _session.Viewport.ScrollToBeat(2.5);
+        _clock.SeekToBeat(2.5);
     }
 
     private void RegisterShortcuts()
@@ -207,6 +208,23 @@ public sealed partial class MainWindow : Window
 
     // ---------------------------------------------------------------- 刷新
 
+    /// <summary>
+    /// 任一编辑区滚动或缩放时，两个编辑区同时重绘，保证始终同步。
+    /// 判定线（播放头）固定在底部，因此视口锚点即为播放头位置，滚动等同于定位播放头。
+    /// </summary>
+    private void OnViewChanged()
+    {
+        if (!_clock.IsPlaying)
+        {
+            _clock.SeekToBeat(_session.Viewport.AnchorBeat);
+        }
+
+        RefreshTimeline();
+        NoteSurface.Invalidate();
+        EventSurface.Invalidate();
+    }
+
+
     private void RefreshAll()
     {
         RefreshLineSelector();
@@ -227,10 +245,9 @@ public sealed partial class MainWindow : Window
         if (!_clock.IsPlaying)
         {
             Scrubber.Value = Math.Clamp(_clock.CurrentBeat, Scrubber.Minimum, Scrubber.Maximum);
+            // 未播放时视口锚点与播放头位置保持一致。
+            _session.Viewport.AnchorBeat = Math.Max(0, _clock.CurrentBeat);
         }
-
-        NoteSurface.PlayBeat = _clock.CurrentBeat;
-        EventSurface.PlayBeat = _clock.CurrentBeat;
 
         TimeReadout.Text = $"{_clock.CurrentSeconds:0.00}s / {tempo.DurationToBeat(_session.Document.LastBeat):0.00}s";
         BeatReadout.Text = $"拍 {_clock.CurrentBeat:0.00}";
@@ -337,10 +354,9 @@ public sealed partial class MainWindow : Window
 
         _clock.Advance(0);
         var beat = _clock.CurrentBeat;
-        _session.Viewport.FollowBeat(beat);
+        // 判定线固定在底部，播放时视口锚定播放头，内容自上而下流动。
+        _session.Viewport.AnchorBeat = Math.Max(0, beat);
         Scrubber.Value = Math.Clamp(beat, Scrubber.Minimum, Scrubber.Maximum);
-        NoteSurface.PlayBeat = beat;
-        EventSurface.PlayBeat = beat;
         RefreshTimeline();
     }
 
@@ -473,9 +489,7 @@ public sealed partial class MainWindow : Window
         }
 
         _clock.SeekToBeat(value);
-        _session.Viewport.ScrollToBeat(Math.Max(0, value - _session.Viewport.VisibleBeats * 0.25));
-        NoteSurface.PlayBeat = _clock.CurrentBeat;
-        EventSurface.PlayBeat = _clock.CurrentBeat;
+        _session.Viewport.ScrollToBeat(value);
         RefreshTimeline();
     }
 

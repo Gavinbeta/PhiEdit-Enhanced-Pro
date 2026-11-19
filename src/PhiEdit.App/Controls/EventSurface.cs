@@ -16,12 +16,17 @@ namespace PhiEdit.App.Controls;
 
 /// <summary>
 /// 判定线区：控制当前判定线的行为（X / Y / 旋转 / 透明度 / 速度 等事件轨道）。
-/// 纵轴为时间，整拍线红色加粗并标注拍号；横向按事件类型分栏。
+///
+/// 与音符区共用同一时间轴与视口，因此两侧始终同步滚动；判定线（播放头）同样固定在画布底部，
+/// 网格线只绘制在判定线以上。
 /// </summary>
 public sealed class EventSurface : UserControl
 {
     private const double HeaderHeight = 24;
     private const double FooterHeight = 26;
+
+    /// <summary>触发拖动所需的最小位移（像素）。</summary>
+    private const double DragThreshold = 3;
 
     private readonly CanvasControl _canvas = new()
     {
@@ -31,21 +36,23 @@ public sealed class EventSurface : UserControl
 
     private EditorSession? _session;
     private ChartEditor? _editor;
-    private double _playBeat;
 
     private LineEvent? _dragEvent;
     private Beat _dragOriginStart;
     private Beat _dragOriginEnd;
+    private double _pressX;
+    private double _pressY;
     private bool _dragMoved;
 
     public EventSurface()
     {
         Content = _canvas;
         _canvas.Draw += OnDraw;
-        _canvas.SizeChanged += (_, _) => _canvas.Invalidate();
+        _canvas.SizeChanged += (_, _) => Invalidate();
         _canvas.PointerPressed += OnPointerPressed;
         _canvas.PointerMoved += OnPointerMoved;
         _canvas.PointerReleased += OnPointerReleased;
+        _canvas.PointerCanceled += OnPointerReleased;
         _canvas.PointerCaptureLost += (_, _) => EndDrag();
         _canvas.PointerWheelChanged += OnPointerWheelChanged;
         _canvas.DoubleTapped += OnDoubleTapped;
@@ -60,7 +67,7 @@ public sealed class EventSurface : UserControl
         set
         {
             _session = value;
-            _canvas.Invalidate();
+            Invalidate();
         }
     }
 
@@ -70,30 +77,15 @@ public sealed class EventSurface : UserControl
         set => _editor = value;
     }
 
-    public double PlayBeat
-    {
-        get => _playBeat;
-        set
-        {
-            if (Math.Abs(_playBeat - value) < 1e-9)
-            {
-                return;
-            }
-
-            _playBeat = value;
-            _canvas.Invalidate();
-        }
-    }
-
     public event EventHandler? SelectionChanged;
 
     public event EventHandler? ViewChanged;
 
-    /// <summary>请求重绘。</summary>
-    public void Invalidate() => _canvas.Invalidate();
-
     /// <summary>当前显示的事件轨道集合。</summary>
     public IReadOnlyList<EventTrackKind> Tracks { get; set; } = EventTrackKinds.Standard;
+
+    /// <summary>请求重绘。</summary>
+    public void Invalidate() => _canvas.Invalidate();
 
     private void OnDraw(CanvasControl sender, CanvasDrawEventArgs args)
     {
@@ -116,25 +108,33 @@ public sealed class EventSurface : UserControl
         var viewport = session.Viewport;
         viewport.ViewportHeight = height;
 
+        var playheadY = viewport.PlayheadY;
         var channelWidth = width / Math.Max(1, Tracks.Count);
         var barWidth = Math.Max(6, channelWidth * 0.62);
 
-        DrawTimeGrid(drawing, session, viewport, width, height);
-        DrawChannelSeparators(drawing, width, height, channelWidth);
+        DrawTimeGrid(drawing, session, viewport, width, playheadY);
+        DrawChannelSeparators(drawing, width, playheadY, channelWidth);
         DrawEvents(drawing, session, viewport, channelWidth, barWidth, width, height);
         DrawHeader(drawing, channelWidth, width);
         DrawFooter(drawing, session, channelWidth, width, height);
+        DrawPlayhead(drawing, width, playheadY);
     }
 
-    private void DrawTimeGrid(CanvasDrawingSession drawing, EditorSession session, EditViewport viewport, double width, double height)
+    private void DrawTimeGrid(CanvasDrawingSession drawing, EditorSession session, EditViewport viewport,
+        double width, double playheadY)
     {
-        var first = viewport.TopBeat - 1;
-        var last = viewport.BottomBeat + 1;
+        var first = viewport.BottomBeat - 1;
+        var last = viewport.TopBeat + 1;
 
         foreach (var tick in GridLayout.Ticks(first, last, session.Division))
         {
+            if (tick.Beat < 0)
+            {
+                continue;
+            }
+
             var y = viewport.YAtBeat(tick.Beat);
-            if (y < -4 || y > height + 4)
+            if (y < -4 || y > playheadY + 4)
             {
                 continue;
             }
@@ -159,13 +159,13 @@ public sealed class EventSurface : UserControl
         }
     }
 
-    private void DrawChannelSeparators(CanvasDrawingSession drawing, double width, double height, double channelWidth)
+    private void DrawChannelSeparators(CanvasDrawingSession drawing, double width, double playheadY, double channelWidth)
     {
         var color = EditorPalette.WithAlpha(Palette.EventColumnSeparator, 95).ToWinColor();
         for (var index = 0; index <= Tracks.Count; index++)
         {
             var x = (float)(index * channelWidth);
-            drawing.DrawLine(x, 0, x, (float)height, color, 1f);
+            drawing.DrawLine(x, 0, x, (float)playheadY, color, 1f);
         }
     }
 
@@ -224,7 +224,7 @@ public sealed class EventSurface : UserControl
         }
     }
 
-    /// <summary>底栏：显示各轨道在播放头处的当前数值。</summary>
+    /// <summary>底栏：显示各轨道在判定线处的当前数值。</summary>
     private void DrawFooter(CanvasDrawingSession drawing, EditorSession session,
         double channelWidth, double width, double height)
     {
@@ -232,17 +232,25 @@ public sealed class EventSurface : UserControl
         drawing.FillRectangle(new Rect(0, top, (float)width, (float)FooterHeight), Palette.EventHeaderBackground.ToWinColor());
 
         var line = session.CurrentLine;
+        var beat = session.Viewport.AnchorBeat;
         var format = CanvasExtensions.TextFormat(13f, center: true);
         for (var channel = 0; channel < Tracks.Count; channel++)
         {
             var kind = Tracks[channel];
-            var value = line is null ? 0 : CurrentValue(line, kind, session.CurrentLayer, _playBeat);
+            var value = line is null ? 0 : CurrentValue(line, kind, session.CurrentLayer, beat);
             var text = kind.FormatValue(value);
             var color = value < 0 ? Palette.EventValueBottom : Palette.EventValueTop;
             drawing.DrawText(text,
                 new Vector2((float)(channel * channelWidth + channelWidth / 2), top + 5),
                 color.ToWinColor(), format);
         }
+    }
+
+    /// <summary>判定线（播放头）：固定在画布底部的粗灰线，压在所有内容之上。</summary>
+    private void DrawPlayhead(CanvasDrawingSession drawing, double width, double playheadY)
+    {
+        var color = EditorPalette.WithAlpha(Palette.Judgement, Palette.JudgementAlpha).ToWinColor();
+        drawing.DrawLine(0, (float)playheadY, (float)width, (float)playheadY, color, Palette.JudgementWidth);
     }
 
     /// <summary>取某轨道在指定拍的当前数值（取该拍之前最后一条事件的结束值）。</summary>
@@ -280,6 +288,9 @@ public sealed class EventSurface : UserControl
 
         var point = e.GetCurrentPoint(_canvas);
         var position = point.Position;
+        _pressX = position.X;
+        _pressY = position.Y;
+
         var hit = HitTestEvent(position.X, position.Y);
 
         if (hit is not null)
@@ -292,14 +303,14 @@ public sealed class EventSurface : UserControl
             _dragMoved = false;
             _canvas.CapturePointer(e.Pointer);
             SelectionChanged?.Invoke(this, EventArgs.Empty);
-            _canvas.Invalidate();
+            Invalidate();
             e.Handled = true;
         }
         else
         {
             _session.SelectedEvents.Clear();
             SelectionChanged?.Invoke(this, EventArgs.Empty);
-            _canvas.Invalidate();
+            Invalidate();
         }
     }
 
@@ -332,7 +343,7 @@ public sealed class EventSurface : UserControl
         _session.SelectedEvents.Clear();
         _session.SelectedEvents.Add(item);
         SelectionChanged?.Invoke(this, EventArgs.Empty);
-        _canvas.Invalidate();
+        Invalidate();
     }
 
     private void OnPointerMoved(object sender, PointerRoutedEventArgs e)
@@ -349,6 +360,13 @@ public sealed class EventSurface : UserControl
         }
 
         var position = point.Position;
+        if (!_dragMoved &&
+            Math.Abs(position.X - _pressX) < DragThreshold &&
+            Math.Abs(position.Y - _pressY) < DragThreshold)
+        {
+            return;
+        }
+
         var viewport = _session.Viewport;
         var beat = viewport.BeatAtY(position.Y);
         if (_session.SnapTime)
@@ -361,7 +379,7 @@ public sealed class EventSurface : UserControl
         _dragEvent.StartBeat = Beat.FromValue(beat);
         _dragEvent.EndBeat = Beat.FromValue(beat + duration);
         _dragMoved = true;
-        _canvas.Invalidate();
+        Invalidate();
         e.Handled = true;
     }
 
@@ -403,7 +421,7 @@ public sealed class EventSurface : UserControl
 
         _session.Document.IsDirty = true;
         SelectionChanged?.Invoke(this, EventArgs.Empty);
-        _canvas.Invalidate();
+        Invalidate();
     }
 
     private LineEvent? HitTestEvent(double x, double y)
@@ -460,11 +478,12 @@ public sealed class EventSurface : UserControl
         }
         else
         {
+            // 向下滚动 = 内容向下移动 = 看到更晚的拍。
             viewport.ScrollByPixels(-delta * 0.6);
         }
 
         ViewChanged?.Invoke(this, EventArgs.Empty);
-        _canvas.Invalidate();
+        Invalidate();
         e.Handled = true;
     }
 }

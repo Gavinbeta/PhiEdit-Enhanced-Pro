@@ -15,10 +15,15 @@ namespace PhiEdit.App.Controls;
 
 /// <summary>
 /// 音符区：编辑当前判定线上的音符。
-/// 横轴为舞台 X 坐标（竖线网格用于对齐），纵轴为时间（整拍线带拍号，细线表示几分之几拍）。
+///
+/// 横轴为舞台 X 坐标（竖线网格用于对齐）；纵轴为时间，自下而上流逝——
+/// 判定线（播放头）固定在画布底部，网格线只绘制在判定线以上，音符则绘制到离开可视区为止。
 /// </summary>
 public sealed class NoteSurface : UserControl
 {
+    /// <summary>触发拖动所需的最小位移（像素），避免点击选中时误触发拖动。</summary>
+    private const double DragThreshold = 3;
+
     private readonly CanvasControl _canvas = new()
     {
         HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -27,19 +32,20 @@ public sealed class NoteSurface : UserControl
 
     private EditorSession? _session;
     private ChartEditor? _editor;
-    private double _playBeat;
 
     private Note? _dragNote;
     private Beat _dragOriginBeat;
     private double _dragOriginX;
     private double _dragOriginY;
+    private double _pressX;
+    private double _pressY;
     private bool _dragMoved;
 
     public NoteSurface()
     {
         Content = _canvas;
         _canvas.Draw += OnDraw;
-        _canvas.SizeChanged += (_, _) => _canvas.Invalidate();
+        _canvas.SizeChanged += (_, _) => Invalidate();
         _canvas.PointerPressed += OnPointerPressed;
         _canvas.PointerMoved += OnPointerMoved;
         _canvas.PointerReleased += OnPointerReleased;
@@ -58,7 +64,7 @@ public sealed class NoteSurface : UserControl
         set
         {
             _session = value;
-            _canvas.Invalidate();
+            Invalidate();
         }
     }
 
@@ -68,26 +74,10 @@ public sealed class NoteSurface : UserControl
         set => _editor = value;
     }
 
-    /// <summary>播放头位置（拍），判定线指示与跟随滚动依赖它。</summary>
-    public double PlayBeat
-    {
-        get => _playBeat;
-        set
-        {
-            if (Math.Abs(_playBeat - value) < 1e-9)
-            {
-                return;
-            }
-
-            _playBeat = value;
-            _canvas.Invalidate();
-        }
-    }
-
     /// <summary>交互导致数据变化时触发，供外部刷新属性面板。</summary>
     public event EventHandler? SelectionChanged;
 
-    /// <summary>视图滚动或缩放变化时触发。</summary>
+    /// <summary>视图滚动或缩放变化时触发（两个编辑区共用同一视口，需同时重绘）。</summary>
     public event EventHandler? ViewChanged;
 
     /// <summary>请求重绘。</summary>
@@ -115,14 +105,17 @@ public sealed class NoteSurface : UserControl
         viewport.ViewportHeight = height;
         viewport.NoteWidth = width;
 
-        DrawVerticalGrid(drawing, session, viewport, width, height);
-        DrawTimeGrid(drawing, session, viewport, width, height);
-        DrawJudgement(drawing, viewport, width, height);
+        var playheadY = viewport.PlayheadY;
+
+        DrawVerticalGrid(drawing, session, viewport, width, playheadY);
+        DrawTimeGrid(drawing, session, viewport, width, playheadY);
         DrawNotes(drawing, session, viewport, width, height);
+        DrawPlayhead(drawing, viewport, width, playheadY);
     }
 
-    /// <summary>竖线网格：黄色细线；竖线数量为奇数时正中竖线加粗。</summary>
-    private void DrawVerticalGrid(CanvasDrawingSession drawing, EditorSession session, EditViewport viewport, double width, double height)
+    /// <summary>竖线网格：黄色细线；竖线数量为奇数时正中竖线加粗。只绘制在判定线以上。</summary>
+    private void DrawVerticalGrid(CanvasDrawingSession drawing, EditorSession session, EditViewport viewport,
+        double width, double playheadY)
     {
         var grid = session.Grid;
         foreach (var stageX in grid.Lines())
@@ -135,21 +128,27 @@ public sealed class NoteSurface : UserControl
 
             var isCenter = Math.Abs(stageX) < 1e-6;
             var strokeWidth = isCenter && grid.HasCenterLine ? Palette.VerticalCenterWidth : Palette.VerticalWidth;
-            drawing.DrawLine((float)x, 0, (float)x, (float)height,
+            drawing.DrawLine((float)x, 0, (float)x, (float)playheadY,
                 EditorPalette.WithAlpha(Palette.VerticalLine, Palette.VerticalAlpha).ToWinColor(), strokeWidth);
         }
     }
 
     /// <summary>时间网格：整拍线为红色加粗并标注拍号，相邻整拍线之间为黄色细线。</summary>
-    private void DrawTimeGrid(CanvasDrawingSession drawing, EditorSession session, EditViewport viewport, double width, double height)
+    private void DrawTimeGrid(CanvasDrawingSession drawing, EditorSession session, EditViewport viewport,
+        double width, double playheadY)
     {
-        var first = viewport.TopBeat - 1;
-        var last = viewport.BottomBeat + 1;
+        var first = viewport.BottomBeat - 1;
+        var last = viewport.TopBeat + 1;
 
         foreach (var tick in GridLayout.Ticks(first, last, session.Division))
         {
+            if (tick.Beat < 0)
+            {
+                continue;
+            }
+
             var y = viewport.YAtBeat(tick.Beat);
-            if (y < -4 || y > height + 4)
+            if (y < -4 || y > playheadY + 4)
             {
                 continue;
             }
@@ -179,17 +178,11 @@ public sealed class NoteSurface : UserControl
         drawing.DrawText(text, new Vector2((float)(width - 8), (float)(y - 16)), Palette.BeatLabel.ToWinColor(), format);
     }
 
-    /// <summary>判定线指示：跟随播放头的白色横线。</summary>
-    private void DrawJudgement(CanvasDrawingSession drawing, EditViewport viewport, double width, double height)
+    /// <summary>判定线（播放头）：固定在画布底部的粗灰线，压在所有内容之上。</summary>
+    private void DrawPlayhead(CanvasDrawingSession drawing, EditViewport viewport, double width, double playheadY)
     {
-        var y = viewport.YAtBeat(_playBeat);
-        if (y < -8 || y > height + 8)
-        {
-            return;
-        }
-
         var color = EditorPalette.WithAlpha(Palette.Judgement, Palette.JudgementAlpha).ToWinColor();
-        drawing.DrawLine(0, (float)y, (float)width, (float)y, color, Palette.JudgementWidth);
+        drawing.DrawLine(0, (float)playheadY, (float)width, (float)playheadY, color, Palette.JudgementWidth);
     }
 
     private void DrawNotes(CanvasDrawingSession drawing, EditorSession session, EditViewport viewport, double width, double height)
@@ -251,6 +244,9 @@ public sealed class NoteSurface : UserControl
         }
 
         var position = point.Position;
+        _pressX = position.X;
+        _pressY = position.Y;
+
         var hit = HitTestNote(position.X, position.Y);
         if (hit is not null)
         {
@@ -275,7 +271,7 @@ public sealed class NoteSurface : UserControl
             PlaceNote(position.X, position.Y);
         }
 
-        _canvas.Invalidate();
+        Invalidate();
         e.Handled = true;
     }
 
@@ -305,7 +301,7 @@ public sealed class NoteSurface : UserControl
         _session.SelectedNotes.Clear();
         _session.SelectedNotes.Add(note);
         SelectionChanged?.Invoke(this, EventArgs.Empty);
-        _canvas.Invalidate();
+        Invalidate();
     }
 
     private void OnPointerMoved(object sender, PointerRoutedEventArgs e)
@@ -322,6 +318,15 @@ public sealed class NoteSurface : UserControl
         }
 
         var position = point.Position;
+
+        // 位移小于阈值时仍算「点击选中」，不触发拖动。
+        if (!_dragMoved &&
+            Math.Abs(position.X - _pressX) < DragThreshold &&
+            Math.Abs(position.Y - _pressY) < DragThreshold)
+        {
+            return;
+        }
+
         var viewport = _session.Viewport;
         var beat = viewport.BeatAtY(position.Y);
         if (_session.SnapTime)
@@ -341,7 +346,7 @@ public sealed class NoteSurface : UserControl
         _dragNote.StartBeat = Beat.FromValue(beat);
         _dragNote.PositionX = stageX;
         _dragNote.PositionY = _dragOriginY;
-        _canvas.Invalidate();
+        Invalidate();
         e.Handled = true;
     }
 
@@ -394,7 +399,7 @@ public sealed class NoteSurface : UserControl
 
         _session.Document.IsDirty = true;
         SelectionChanged?.Invoke(this, EventArgs.Empty);
-        _canvas.Invalidate();
+        Invalidate();
     }
 
     private Note? HitTestNote(double x, double y)
@@ -435,18 +440,18 @@ public sealed class NoteSurface : UserControl
 
         var position = e.GetCurrentPoint(_canvas).Position;
         var viewport = _session.Viewport;
-
         if (e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Control))
         {
             viewport.ZoomAt(position.Y, delta > 0 ? 1.15 : 1 / 1.15);
         }
         else
         {
+            // 向下滚动 = 内容向下移动 = 看到更晚的拍。
             viewport.ScrollByPixels(-delta * 0.6);
         }
 
         ViewChanged?.Invoke(this, EventArgs.Empty);
-        _canvas.Invalidate();
+        Invalidate();
         e.Handled = true;
     }
 }

@@ -13,6 +13,8 @@
     <SelfContained>true</SelfContained>
     <Platforms>x64</Platforms>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <!-- 统一输出目录：无论按项目还是按解决方案构建，产物都落在同一目录，避免启动到旧版本。 -->
+    <AppendPlatformToOutputPath>false</AppendPlatformToOutputPath>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>PhiEdit.App</RootNamespace>

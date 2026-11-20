@@ -33,4 +33,9 @@
     <ProjectReference Include="..\PhiEdit.Core\PhiEdit.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 内置音符资源包：随程序分发，可在设置页查看与切换 -->
+    <Content Include="Assets\NoteSkins\*.zip" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

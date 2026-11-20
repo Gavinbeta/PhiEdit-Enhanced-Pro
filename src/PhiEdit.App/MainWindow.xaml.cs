@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using PhiEdit.App.Controls;
+using PhiEdit.App.Services;
 using PhiEdit.Core.Beats;
 using PhiEdit.Core.Charts;
 using PhiEdit.Core.Editing;
@@ -30,6 +31,8 @@ public sealed partial class MainWindow : Window
 
     private readonly EditorPalette _palette = new();
 
+    private readonly NoteSkinRenderer _skinRenderer = new();
+
     private readonly DispatcherQueueTimer _timer;
 
     private string? _currentFilePath;
@@ -49,10 +52,12 @@ public sealed partial class MainWindow : Window
         NoteSurface.Session = _session;
         NoteSurface.Editor = _editor;
         NoteSurface.Palette = _palette;
+        NoteSurface.Renderer = _skinRenderer;
         EventSurface.Session = _session;
         EventSurface.Editor = _editor;
         EventSurface.Palette = _palette;
 
+        NoteSurface.SkinLoadFailed += (_, message) => StatusReadout.Text = message;
         NoteSurface.SelectionChanged += (_, _) => RefreshInspector();
         EventSurface.SelectionChanged += (_, _) => RefreshInspector();
         _session.Viewport.ViewChanged += (_, _) => OnViewChanged();
@@ -79,6 +84,8 @@ public sealed partial class MainWindow : Window
 
         BuildSampleChart();
         RefreshAll();
+
+        RootLayout.Loaded += async (_, _) => await InitializeSkinsAsync();
     }
 
     // ---------------------------------------------------------------- 初始化
@@ -352,6 +359,167 @@ public sealed partial class MainWindow : Window
             : $"已选 {notes} 音符 / {events} 事件";
     }
 
+    // ---------------------------------------------------------------- 设置与资源包
+
+    /// <summary>装载内置资源包，并把首个资源包设为当前生效的皮肤。</summary>
+    private async Task InitializeSkinsAsync()
+    {
+        var failures = BuiltinSkins.Load(_session);
+        foreach (var failure in failures)
+        {
+            StatusReadout.Text = failure;
+        }
+
+        _session.Skins.Changed += OnSkinsChanged;
+
+        if (_session.Skins.Active is not null)
+        {
+            ApplySkinAsync(_session.Skins.Active);
+        }
+
+        RefreshSkinList();
+    }
+
+    private async void OnSkinsChanged(object? sender, EventArgs e)
+    {
+        RefreshSkinList();
+        if (_session.Skins.Active is not null)
+        {
+            ApplySkinAsync(_session.Skins.Active);
+        }
+    }
+
+    /// <summary>应用资源包：贴图由画布在设备就绪后加载。</summary>
+    private void ApplySkinAsync(PhiEdit.Core.Skins.NoteSkin skin)
+    {
+        NoteSurface.RequestSkinReload();
+        StatusReadout.Text = $"已应用皮肤：{skin.Info.Name}";
+    }
+
+    /// <summary>列表项与资源包的对应关系。</summary>
+    private readonly List<PhiEdit.Core.Skins.NoteSkin> _skinItems = new();
+
+    /// <summary>刷新设置页的资源包列表。</summary>
+    private void RefreshSkinList()
+    {
+        _skinItems.Clear();
+        SkinList.Items.Clear();
+        foreach (var skin in _session.Skins.Skins)
+        {
+            _skinItems.Add(skin);
+            SkinList.Items.Add($"{skin.Info.Name} · {skin.Info.Author}");
+        }
+
+        if (_session.Skins.Active is not null)
+        {
+            for (var index = 0; index < _skinItems.Count; index++)
+            {
+                if (_skinItems[index].Id == _session.Skins.Active.Id)
+                {
+                    SkinList.SelectedIndex = index;
+                    break;
+                }
+            }
+        }
+    }
+
+    private void OnSkinSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (SkinList.SelectedIndex < 0 || SkinList.SelectedIndex >= _skinItems.Count)
+        {
+            return;
+        }
+
+        var skin = _skinItems[SkinList.SelectedIndex];
+
+        SkinPreviewInfo.Text = $"名称：{skin.Info.Name}\n作者：{skin.Info.Author}";
+        SkinDescription.Text = string.IsNullOrWhiteSpace(skin.Info.Description)
+            ? "（无说明）"
+            : skin.Info.Description;
+
+        foreach (var warning in skin.Warnings)
+        {
+            SettingsStatus.Text = warning;
+        }
+    }
+
+    private void OnSettingsClick(object sender, RoutedEventArgs e)
+    {
+        SettingsOverlay.Visibility = Visibility.Visible;
+        RefreshSkinList();
+        SettingsStatus.Text = "准备就绪。";
+    }
+
+    private void OnCloseSettingsClick(object sender, RoutedEventArgs e)
+    {
+        SettingsOverlay.Visibility = Visibility.Collapsed;
+    }
+
+    private async void OnImportSkinClick(object sender, RoutedEventArgs e)
+    {
+        var picker = new Windows.Storage.Pickers.FileOpenPicker();
+        picker.FileTypeFilter.Add(".zip");
+        InitializeWithWindow.Initialize(picker, GetWindowHandle());
+        var file = await picker.PickSingleFileAsync();
+        if (file is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var archive = await File.ReadAllBytesAsync(file.Path);
+
+            var skin = PhiEdit.Core.Skins.NoteSkin.FromZip(archive, PhiEdit.Core.Skins.NoteSkin.ComputeId(
+                PhiEdit.Core.Skins.NoteSkin.ReadArchive(archive)));
+            _session.Skins.Add(skin);
+            _session.Skins.Activate(skin.Id);
+            ApplySkinAsync(skin);
+            RefreshSkinList();
+            SettingsStatus.Text = $"已导入资源包：{skin.Info.Name}";
+        }
+        catch (Exception exception)
+        {
+            SettingsStatus.Text = $"资源包导入失败：{exception.Message}";
+        }
+    }
+
+    private void OnApplySkinClick(object sender, RoutedEventArgs e)
+    {
+        if (SkinList.SelectedIndex < 0 || SkinList.SelectedIndex >= _skinItems.Count)
+        {
+            SettingsStatus.Text = "请先选择一个资源包。";
+            return;
+        }
+
+        var skin = _skinItems[SkinList.SelectedIndex];
+
+        _session.Skins.Activate(skin.Id);
+        ApplySkinAsync(skin);
+        SettingsStatus.Text = $"已应用皮肤：{skin.Info.Name}";
+    }
+
+    private void OnDeleteSkinClick(object sender, RoutedEventArgs e)
+    {
+        if (SkinList.SelectedIndex < 0 || SkinList.SelectedIndex >= _skinItems.Count)
+        {
+            SettingsStatus.Text = "请先选择一个资源包。";
+            return;
+        }
+
+        var skin = _skinItems[SkinList.SelectedIndex];
+
+        if (skin.IsBuiltin)
+        {
+            SettingsStatus.Text = "内置资源包不可删除。";
+            return;
+        }
+
+        _session.Skins.Remove(skin.Id);
+        RefreshSkinList();
+        SettingsStatus.Text = $"已删除资源包：{skin.Info.Name}";
+    }
+
     // ---------------------------------------------------------------- 分栏
 
     /// <summary>把窗口放到工作区中央并按屏幕尺寸设置初始大小。</summary>
@@ -513,6 +681,7 @@ public sealed partial class MainWindow : Window
     private void RefreshInspector()
     {
         UpdateInspectorTab();
+        RefreshSelectionInfo();
 
         var note = _session.SelectedNotes.FirstOrDefault();
         if (note is not null)

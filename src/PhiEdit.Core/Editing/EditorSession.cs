@@ -1,5 +1,6 @@
 using PhiEdit.Core.Charts;
 using PhiEdit.Core.Layout;
+using PhiEdit.Core.Skins;
 
 namespace PhiEdit.Core.Editing;
 
@@ -25,6 +26,9 @@ public sealed class EditorSession
     public ChartDocument Document { get; set; }
 
     public UndoStack Undo { get; }
+
+    /// <summary>已安装的音符资源包，当前生效的资源包决定音符贴图。</summary>
+    public NoteSkinLibrary Skins { get; } = new();
 
     public EditViewport Viewport { get; }
 
@@ -85,6 +89,33 @@ public sealed class EditorSession
 
     /// <summary>数据或选择发生变化时触发。</summary>
     public event EventHandler? Changed;
+
+    /// <summary>
+    /// 选中一个音符：先取消此前的事件选择，再选中该音符。
+    /// 音符与事件的选择互斥，避免出现「删掉了两个对象」的情况。
+    /// </summary>
+    public void SelectNote(Note note, bool additive = false)
+    {
+        SelectedEvents.Clear();
+        if (!additive)
+        {
+            SelectedNotes.Clear();
+        }
+
+        SelectedNotes.Add(note);
+    }
+
+    /// <summary>选中一个事件：先取消此前的音符选择，再选中该事件。</summary>
+    public void SelectEvent(LineEvent item, bool additive = false)
+    {
+        SelectedNotes.Clear();
+        if (!additive)
+        {
+            SelectedEvents.Clear();
+        }
+
+        SelectedEvents.Add(item);
+    }
 
     /// <summary>清空剪贴板。</summary>
     public void ClearClipboard()

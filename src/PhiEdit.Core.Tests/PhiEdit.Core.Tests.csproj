@@ -18,4 +18,10 @@
     <ProjectReference Include="..\PhiEdit.Core\PhiEdit.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 内置资源包副本，用于校验内置皮肤始终可被正确解析 -->
+    <None Include="..\PhiEdit.App\Assets\NoteSkins\builtin-gaofan.zip" Link="NoteSkins\builtin-gaofan.zip"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

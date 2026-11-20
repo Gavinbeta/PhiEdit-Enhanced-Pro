@@ -47,6 +47,9 @@ public sealed class EditorCanvas : UserControl
     private double _pressY;
     private bool _noteDragMoved;
     private bool _eventDragMoved;
+    private double _notePointerBeat;
+    private double _notePointerStageX;
+    private double _eventPointerBeat;
 
     private readonly List<NoteDragOrigin> _noteOrigins = new();
     private readonly List<EventDragOrigin> _eventOrigins = new();
@@ -765,6 +768,9 @@ public sealed class EditorCanvas : UserControl
             _dragNote = hit;
             _noteDragMoved = false;
             CaptureNoteOrigins();
+            _notePointerBeat = SnapBeat(_session.Viewport.BeatAtY(point.Y));
+            _notePointerStageX = SnapX(_session.Viewport.PixelToStageX(
+                ClampNotePixel(point.X, Layout(_canvas.ActualWidth).LeftWidth) - Palette.GridInsetX));
             _canvas.CapturePointer(e.Pointer);
             return;
         }
@@ -821,6 +827,7 @@ public sealed class EditorCanvas : UserControl
             _dragEvent = hit;
             _eventDragMoved = false;
             CaptureEventOrigins();
+            _eventPointerBeat = SnapBeat(_session.Viewport.BeatAtY(point.Y));
             _canvas.CapturePointer(e.Pointer);
             return;
         }
@@ -899,16 +906,19 @@ public sealed class EditorCanvas : UserControl
                 return;
             }
 
+            // 以按下点为起点计算位移，保持鼠标与物件的相对位置不变。
             var clampedX = ClampNotePixel(position.X, leftWidth);
             var stageX = SnapX(viewport.PixelToStageX(clampedX - Palette.GridInsetX));
-            var origin = _noteOrigins[0];
-            var deltaBeat = beat - origin.Beat;
-            var deltaX = stageX - origin.X;
+            var deltaBeat = beat - _notePointerBeat;
+            var deltaX = stageX - _notePointerStageX;
             foreach (var state in _noteOrigins)
             {
-                state.Note.StartBeat = Beat.FromValue(state.Beat + deltaBeat);
-                state.Note.EndBeat = Beat.FromValue(state.End + deltaBeat);
-                state.Note.PositionX = state.X + deltaX;
+                var start = Math.Max(0, state.Beat + deltaBeat);
+                var duration = state.End - state.Beat;
+                state.Note.StartBeat = Beat.FromValue(start);
+                state.Note.EndBeat = Beat.FromValue(start + duration);
+                state.Note.PositionX = Math.Clamp(state.X + deltaX,
+                    -VerticalGrid.StageHalfWidth, VerticalGrid.StageHalfWidth);
             }
 
             _noteDragMoved = true;
@@ -925,11 +935,13 @@ public sealed class EditorCanvas : UserControl
                 return;
             }
 
-            var delta = beat - _eventOrigins[0].Start;
+            var delta = beat - _eventPointerBeat;
             foreach (var state in _eventOrigins)
             {
-                state.Event.StartBeat = Beat.FromValue(state.Start + delta);
-                state.Event.EndBeat = Beat.FromValue(state.End + delta);
+                var start = Math.Max(0, state.Start + delta);
+                var duration = state.End - state.Start;
+                state.Event.StartBeat = Beat.FromValue(start);
+                state.Event.EndBeat = Beat.FromValue(start + duration);
             }
 
             _eventDragMoved = true;

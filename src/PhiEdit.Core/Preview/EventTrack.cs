@@ -30,6 +30,13 @@ public sealed class EventTrack
     /// <summary>是否有事件。</summary>
     public bool HasEvents => _events.Count > 0;
 
+    /// <summary>
+    /// 旧版本编辑器曾把 Alpha 写成 0–1；这类轨道需要在采样后放大到 0–255。
+    /// 标准 RPE 事件本身已是 0–255，不会被这里改变。
+    /// </summary>
+    public bool IsLegacyAlpha => HasEvents && _events.All(entry =>
+        Math.Abs(entry.Event.StartValue) <= 1.001 && Math.Abs(entry.Event.EndValue) <= 1.001);
+
     public double Number(double seconds) => ToDouble(Value(seconds));
 
     public object? Value(double seconds)

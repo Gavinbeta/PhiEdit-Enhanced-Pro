@@ -45,8 +45,12 @@ public sealed class PreviewCanvas : UserControl
     private string? _loadedPackId;
     private bool _packLoading;
     private CanvasBitmap? _background;
+    private GaussianBlurEffect? _backgroundEffect;
     private string? _backgroundKey;
+    private ChartDocument? _backgroundDocument;
+    private ChartAssetStore? _backgroundAssets;
     private bool _backgroundLoading;
+    private bool _backgroundResolved;
     private bool _loading;
 
     public PreviewCanvas()
@@ -76,6 +80,9 @@ public sealed class PreviewCanvas : UserControl
             }
 
             _backgroundKey = null;
+            _backgroundResolved = false;
+            _backgroundDocument = null;
+            _backgroundAssets = null;
             _scene.MarkDirty();
             Invalidate();
         }
@@ -93,9 +100,27 @@ public sealed class PreviewCanvas : UserControl
 
     public void Invalidate() => _canvas.Invalidate();
 
+    /// <summary>窗口关闭时释放该窗口设备上的位图与效果。</summary>
+    public void ReleaseResources()
+    {
+        _backgroundEffect?.Dispose();
+        _background?.Dispose();
+        _backgroundEffect = null;
+        _background = null;
+        _textures.Reset();
+        _packRenderer.Reset();
+        foreach (var bitmap in _assetTextures.Values)
+        {
+            bitmap.Dispose();
+        }
+        _assetTextures.Clear();
+    }
+
     private void OnSessionChanged(object? sender, EventArgs e)
     {
         _scene.MarkDirty();
+        _backgroundDocument = null;
+        _backgroundResolved = false;
         Invalidate();
     }
 
@@ -194,12 +219,15 @@ public sealed class PreviewCanvas : UserControl
             using var stream = new MemoryStream(bytes, writable: false);
             using var random = stream.AsRandomAccessStream();
             _background?.Dispose();
+            _backgroundEffect?.Dispose();
             _background = await CanvasBitmap.LoadAsync(creator, random);
+            _backgroundEffect = new GaussianBlurEffect { Source = _background, BlurAmount = 10.5f };
             Invalidate();
         }
         catch
         {
             _background = null;
+            _backgroundEffect = null;
         }
         finally
         {
@@ -262,7 +290,21 @@ public sealed class PreviewCanvas : UserControl
         EnsureTexturesLoaded(sender);
         EnsurePackLoaded(sender);
         var viewport = PreviewViewport.Create(width, height);
-        var backgroundName = session.Assets.FindBackground(session.Document.Background);
+        if (!ReferenceEquals(_backgroundDocument, session.Document) || !ReferenceEquals(_backgroundAssets, session.Assets))
+        {
+            _backgroundDocument = session.Document;
+            _backgroundAssets = session.Assets;
+            _backgroundKey = null;
+            _backgroundResolved = false;
+        }
+
+        if (!_backgroundResolved)
+        {
+            _backgroundKey = session.Assets.FindBackground(session.Document.Background);
+            _backgroundResolved = true;
+        }
+
+        var backgroundName = _backgroundKey;
         EnsureBackgroundLoaded(sender, backgroundName);
         using (drawing.CreateLayer(1, new Rect(viewport.Left, viewport.Top, viewport.Width, viewport.Height)))
         {
@@ -287,11 +329,12 @@ public sealed class PreviewCanvas : UserControl
         var originX = (float)(viewport.Left + viewport.Width / 2);
         var originY = (float)(viewport.Top + viewport.Height / 2);
 
+        var visibleCache = new Dictionary<int, IReadOnlyList<NoteEntry>>();
         using (drawing.CreateLayer(1, new Rect(viewport.Left, viewport.Top, viewport.Width, viewport.Height)))
         {
-            DrawPass(drawing, sender, PassKind.Line, states, originX, originY, scale, seconds);
-            DrawPass(drawing, sender, PassKind.Hold, states, originX, originY, scale, seconds);
-            DrawPass(drawing, sender, PassKind.Note, states, originX, originY, scale, seconds);
+            DrawPass(drawing, sender, PassKind.Line, states, originX, originY, scale, seconds, visibleCache);
+            DrawPass(drawing, sender, PassKind.Hold, states, originX, originY, scale, seconds, visibleCache);
+            DrawPass(drawing, sender, PassKind.Note, states, originX, originY, scale, seconds, visibleCache);
             DrawHits(drawing, states, originX, originY, scale, seconds, viewport);
         }
 
@@ -312,14 +355,15 @@ public sealed class PreviewCanvas : UserControl
         var drawHeight = _background.Size.Height * factor;
         var destination = new Rect((width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
         var source = new Rect(0, 0, _background.Size.Width, _background.Size.Height);
-        var blur = new GaussianBlurEffect { Source = _background, BlurAmount = 10.5f };
+        var blur = _backgroundEffect ?? new GaussianBlurEffect { Source = _background, BlurAmount = 10.5f };
         drawing.DrawImage(blur, destination, source, 0.35f);
     }
 
     private enum PassKind { Line, Hold, Note }
 
     private void DrawPass(CanvasDrawingSession drawing, ICanvasResourceCreator creator, PassKind pass,
-        IReadOnlyList<LineState> states, float originX, float originY, float scale, double seconds)
+        IReadOnlyList<LineState> states, float originX, float originY, float scale, double seconds,
+        Dictionary<int, IReadOnlyList<NoteEntry>> visibleCache)
     {
         foreach (var index in _scene.Order)
         {
@@ -346,7 +390,12 @@ public sealed class PreviewCanvas : UserControl
             }
             else
             {
-                var entries = runtime.VisibleNotes(seconds, state, 2000 / Math.Max(0.01, Math.Abs(runtime.Line.Speed)));
+                if (!visibleCache.TryGetValue(index, out var entries))
+                {
+                    entries = runtime.VisibleNotes(seconds, state, 2000 / Math.Max(0.01, Math.Abs(runtime.Line.Speed)));
+                    visibleCache[index] = entries;
+                }
+
                 foreach (var entry in entries)
                 {
                     if ((entry.Note.Type == NoteType.Hold) != (pass == PassKind.Hold))
@@ -613,6 +662,19 @@ public sealed class PreviewCanvas : UserControl
     {
         var defaultTint = new[] { 255.0, 236.0, 160.0 };
         var pack = _packRenderer.IsReady ? _packRenderer.Skin : null;
+        var samples = new Dictionary<long, IReadOnlyList<LineState>>();
+        IReadOnlyList<LineState> SampleAt(double time)
+        {
+            var key = (long)Math.Round(time * 1_000_000);
+            if (!samples.TryGetValue(key, out var result))
+            {
+                result = _scene.Sample(time);
+                samples[key] = result;
+            }
+
+            return result;
+        }
+
         foreach (var index in _scene.Order)
         {
             if (index >= _scene.Lines.Count)
@@ -623,6 +685,11 @@ public sealed class PreviewCanvas : UserControl
             var runtime = _scene.Lines[index];
             foreach (var entry in runtime.Notes)
             {
+                if (entry.End < seconds - 2.0 / 3.0 || entry.Start > seconds)
+                {
+                    continue;
+                }
+
                 foreach (var time in HitTimes(entry))
                 {
                     var age = seconds - time;
@@ -631,7 +698,7 @@ public sealed class PreviewCanvas : UserControl
                         continue;
                     }
 
-                    var hitStates = _scene.Sample(time);
+                    var hitStates = SampleAt(time);
                     if (index >= hitStates.Count)
                     {
                         continue;

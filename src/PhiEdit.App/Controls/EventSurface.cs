@@ -29,9 +29,6 @@ public sealed class EventSurface : UserControl
     /// <summary>触发拖动所需的最小位移（像素）。</summary>
     private const double DragThreshold = 3;
 
-    /// <summary>事件条的最小可见高度（像素）。</summary>
-    private const float MinEventHeight = 6f;
-
     private readonly CanvasControl _canvas = new()
     {
         HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -226,8 +223,8 @@ public sealed class EventSurface : UserControl
 
                 var rectTop = (float)Math.Max(0, top);
                 var rectBottom = (float)Math.Min(height, bottom);
-                // 零长度事件也要有可读的厚度，便于观察与点选。
-                var rectHeight = Math.Max(MinEventHeight, rectBottom - rectTop);
+                // 事件条严格按起止拍绘制：起点 4:1/2、终点 5:1/2 就是一段覆盖该区间的长条。
+                var rectHeight = Math.Max(2f, rectBottom - rectTop);
                 var selected = session.SelectedEvents.Contains(item);
 
                 var fill = selected ? Palette.EventFillSelected : Palette.EventFill;
@@ -386,9 +383,14 @@ public sealed class EventSurface : UserControl
                 return;
             }
 
-            if (!_session.SelectedEvents.Contains(hit))
+            // 无论该事件此前是否已被选中，点击事件都要先取消音符选择，
+            // 否则会残留「音符与事件同时被选中」的状态。
+            if (_session.SelectedEvents.Contains(hit))
             {
-                // 选择事件时先取消音符选择，两类对象的选择互斥。
+                _session.SelectedNotes.Clear();
+            }
+            else
+            {
                 _session.SelectEvent(hit);
             }
 
@@ -410,6 +412,7 @@ public sealed class EventSurface : UserControl
             if (!shift)
             {
                 _session.SelectedEvents.Clear();
+                _session.SelectedNotes.Clear();
                 SelectionChanged?.Invoke(this, EventArgs.Empty);
             }
 
@@ -632,9 +635,8 @@ public sealed class EventSurface : UserControl
             {
                 var top = viewport.YAtBeat(item.EndBeat.Value);
                 var bottom = viewport.YAtBeat(item.StartBeat.Value);
-                var half = Math.Max(MinEventHeight, Math.Abs(bottom - top)) / 2;
                 var center = (top + bottom) / 2;
-                if (y >= center - half - 2 && y <= center + half + 2)
+                if (y >= Math.Min(top, bottom) - 4 && y <= Math.Max(top, bottom) + 4)
                 {
                     return item;
                 }

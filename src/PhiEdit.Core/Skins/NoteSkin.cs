@@ -47,6 +47,12 @@ public sealed class NoteSkin
 
     public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
 
+    /// <summary>
+    /// 高亮贴图相对普通贴图的宽度倍率。
+    /// 原版以 Tap 的两张贴图宽度之比作为所有高亮音符的统一倍率。
+    /// </summary>
+    public double HighlightScale { get; private set; } = 1;
+
     public bool IsBuiltin { get; init; }
 
     /// <summary>按文件名取贴图字节。</summary>
@@ -123,7 +129,7 @@ public sealed class NoteSkin
             warnings.Add("资源包包含结算音效，当前版本暂未使用。");
         }
 
-        return new NoteSkin
+        var skin = new NoteSkin
         {
             Id = id,
             Info = info,
@@ -132,6 +138,11 @@ public sealed class NoteSkin
             Warnings = warnings,
             IsBuiltin = builtin,
         };
+
+        var normal = images["click.png"].Width;
+        var highlighted = images["click_mh.png"].Width;
+        skin.HighlightScale = normal > 0 && highlighted > 0 ? (double)highlighted / normal : 1;
+        return skin;
     }
 
     /// <summary>按内容生成稳定标识（与文件路径无关）。</summary>

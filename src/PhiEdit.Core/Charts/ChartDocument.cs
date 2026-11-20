@@ -60,6 +60,29 @@ public sealed class ChartDocument
 
     public JudgeLine? FindLine(int id) => Lines.FirstOrDefault(line => line.Id == id);
 
+    /// <summary>
+    /// 找出「多押」的音符：与其它音符落在同一时刻的音符集合。
+    /// 原版用它来提示同时按下的音符（高亮贴图），与选中状态无关。
+    /// </summary>
+    public HashSet<Note> SimultaneousNotes(TempoMap? tempo = null)
+    {
+        var map = tempo ?? BuildTempoMap();
+        var times = new Dictionary<Note, long>();
+        var counts = new Dictionary<long, int>();
+
+        foreach (var line in Lines)
+        {
+            foreach (var note in line.Notes)
+            {
+                var time = (long)Math.Round(map.SecondsAt(note.StartBeat.Value) * 1_000_000);
+                times[note] = time;
+                counts[time] = counts.GetValueOrDefault(time) + 1;
+            }
+        }
+
+        return times.Where(pair => counts[pair.Value] > 1).Select(pair => pair.Key).ToHashSet();
+    }
+
     public JudgeLine AddLine()
     {
         var line = new JudgeLine

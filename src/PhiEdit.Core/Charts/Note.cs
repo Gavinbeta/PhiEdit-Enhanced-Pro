@@ -24,6 +24,9 @@ public sealed class Note
     /// <summary>是否为占位音符。</summary>
     public bool IsFake { get; set; }
 
+    /// <summary>音符尺寸倍率（原版 note.size），影响绘制宽度。</summary>
+    public double Size { get; set; } = 1;
+
     /// <summary>音效素材相对路径。</summary>
     public string? HitSound { get; set; }
 

@@ -199,6 +199,31 @@ public static class RpeJson
                     entry["color"] = item.Color;
                 }
 
+                if (!string.IsNullOrEmpty(item.EndColor))
+                {
+                    entry["endColor"] = item.EndColor;
+                }
+
+                if (!string.IsNullOrEmpty(item.StartText))
+                {
+                    entry["startText"] = item.StartText;
+                }
+
+                if (!string.IsNullOrEmpty(item.EndText))
+                {
+                    entry["endText"] = item.EndText;
+                }
+
+                if (item.Kind == EventTrackKind.Paint)
+                {
+                    entry["shaderType"] = item.ShaderType ?? string.Empty;
+                    entry["shaderGlobal"] = item.ShaderGlobal;
+                    entry["shaderAutoAlign"] = item.ShaderAutoAlign;
+                    entry["shaderOrder"] = item.ShaderOrder;
+                    entry["shaderParameter"] = item.ShaderParameter ?? string.Empty;
+                    entry["shaderCode"] = item.ShaderCode ?? string.Empty;
+                }
+
                 array.Add(entry);
             }
 
@@ -387,6 +412,15 @@ public static class RpeJson
             IsHooked = GetDouble(element, "inst") == 1,
             Text = GetString(element, "text"),
             Color = GetString(element, "color"),
+            EndColor = GetString(element, "endColor"),
+            StartText = GetString(element, "startText"),
+            EndText = GetString(element, "endText"),
+            ShaderType = GetString(element, "shaderType") ?? "chromatic",
+            ShaderGlobal = GetBool(element, "shaderGlobal"),
+            ShaderAutoAlign = !element.TryGetProperty("shaderAutoAlign", out var autoAlign) || GetBool(element, "shaderAutoAlign"),
+            ShaderOrder = (int)GetDouble(element, "shaderOrder"),
+            ShaderParameter = GetString(element, "shaderParameter") ?? "sampleCount",
+            ShaderCode = GetString(element, "shaderCode"),
         };
     }
 

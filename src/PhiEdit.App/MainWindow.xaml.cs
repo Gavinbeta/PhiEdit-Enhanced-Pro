@@ -102,6 +102,22 @@ public sealed partial class MainWindow : Window
         GridCountBox.Value = _session.GridCount;
         SnapToggle.IsOn = _session.SnapX;
 
+        for (var layer = 0; layer <= JudgeLine.SpecialLayer; layer++)
+        {
+            var button = new ToggleButton
+            {
+                Content = layer == JudgeLine.SpecialLayer
+                    ? "特殊"
+                    : layer.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                Tag = layer,
+                MinWidth = 32,
+                IsChecked = layer == _session.CurrentLayer,
+                Style = Application.Current.Resources["ToolbarToggleStyle"] as Style,
+            };
+            button.Click += OnLayerButtonClick;
+            LayerButtons.Children.Add(button);
+        }
+
         BuildSampleChart();
         RefreshAll();
 
@@ -958,6 +974,26 @@ public sealed partial class MainWindow : Window
         // 纵向位置唯一真源：进度条只改它，其余刷新由视口事件驱动。
         _session.Viewport.SetPosition(value);
         RefreshTimeline();
+    }
+
+    /// <summary>切换基础事件层（0–3），事件与音符选择同时清空。</summary>
+    private void OnLayerButtonClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ToggleButton button || button.Tag is not int layer)
+        {
+            return;
+        }
+
+        foreach (var child in LayerButtons.Children.OfType<ToggleButton>())
+        {
+            child.IsChecked = ReferenceEquals(child, button);
+        }
+
+        _session.CurrentLayer = layer;
+        _session.SelectedEvents.Clear();
+        _session.SelectedNotes.Clear();
+        StatusReadout.Text = $"事件层 {layer}";
+        RefreshAll();
     }
 
     // ---------------------------------------------------------------- 属性面板

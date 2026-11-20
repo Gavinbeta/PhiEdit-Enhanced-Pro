@@ -143,6 +143,43 @@ public sealed class ChartAssetStore
         return store;
     }
 
+    /// <summary>
+    /// 按原版 info.txt 的 Chart 字段寻找谱面 JSON，找不到时回退到包内唯一 JSON。
+    /// </summary>
+    public string? FindChart()
+    {
+        foreach (var infoName in _files.Keys.Where(name => Path.GetFileName(name).Equals("info.txt", StringComparison.OrdinalIgnoreCase)))
+        {
+            var directory = Path.GetDirectoryName(infoName) ?? string.Empty;
+            var text = Encoding.UTF8.GetString(_files[infoName]);
+            foreach (var line in text.Split('\n'))
+            {
+                var separator = line.IndexOf(':');
+                if (separator < 0 || !line[..separator].Trim().Equals("Chart", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var value = line[(separator + 1)..].Trim();
+                var relative = directory.Length > 0 && !value.Contains('/') ? directory + "/" + value : value;
+                if (Resolve(relative) is not null)
+                {
+                    return Normalize(relative);
+                }
+
+                if (Resolve(value) is not null)
+                {
+                    return Normalize(value);
+                }
+            }
+        }
+
+        var charts = _files.Keys.Where(name =>
+            name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ||
+            name.EndsWith(".pec", StringComparison.OrdinalIgnoreCase)).ToList();
+        return charts.Count == 1 ? charts[0] : null;
+    }
+
     public static bool IsImage(string name) =>
         Regex.IsMatch(Path.GetExtension(name), @"^\.(png|jpe?g|webp|gif|bmp|avif)$", RegexOptions.IgnoreCase);
 

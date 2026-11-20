@@ -23,7 +23,7 @@
                 <TextBlock x:Name="DocumentTitle" Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center"
                            FontSize="13" Foreground="{ThemeResource TextSecondaryBrush}" Text="未命名" />
                 <TextBlock x:Name="BuildVersion" Grid.Column="2" VerticalAlignment="Center" FontSize="12"
-                           Foreground="{ThemeResource TextSecondaryBrush}" Text="v1.0.0" />
+                           Foreground="{ThemeResource TextSecondaryBrush}" Text="v1.2.2_BETA1" />
             </Grid>
         </Grid>
 
@@ -40,6 +40,10 @@
                     <Button x:Name="OpenButton" Style="{StaticResource ToolbarButtonStyle}" Click="OnOpenClick"
                             ToolTipService.ToolTip="打开谱面 (Ctrl+O)">
                         <FontIcon Glyph="&#xE8E5;" FontSize="16" />
+                    </Button>
+                    <Button x:Name="ImportPezButton" Style="{StaticResource ToolbarButtonStyle}" Click="OnImportPezClick"
+                            ToolTipService.ToolTip="导入 PEZ 谱面包">
+                        <TextBlock Text="PEZ" FontSize="11" />
                     </Button>
                     <Button x:Name="SaveButton" Style="{StaticResource ToolbarButtonStyle}" Click="OnSaveClick"
                             ToolTipService.ToolTip="保存谱面 (Ctrl+S)">

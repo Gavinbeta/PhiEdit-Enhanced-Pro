@@ -23,6 +23,22 @@ public class ChartAssetStoreTests
         Assert.Equal("Resources/chart/bg.png", store.FindBackground(string.Empty));
     }
 
+    [Fact]
+    public void FindChart_UsesInfoTxtChartField()
+    {
+        using var stream = new MemoryStream();
+        using (var zip = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            Write(zip, "info.txt", "Chart: chart.json\nPicture: bg.png");
+            Write(zip, "chart.json", "{}");
+            Write(zip, "other.json", "{}");
+            Write(zip, "bg.png", new byte[] { 1 });
+        }
+
+        var store = ChartAssetStore.FromZip(stream.ToArray());
+        Assert.Equal("chart.json", store.FindChart());
+    }
+
     private static void Write(ZipArchive zip, string name, string text) =>
         Write(zip, name, Encoding.UTF8.GetBytes(text));
 

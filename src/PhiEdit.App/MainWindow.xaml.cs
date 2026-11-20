@@ -57,6 +57,8 @@ public sealed partial class MainWindow : Window
         ApplyInitialWindowPlacement();
 
         _clock.Tempo = _session.Document.BuildTempoMap();
+        // 鼠标只用于选择/拖动/框选；物件改由 Q/W/E/R 在指针处放置。
+        _session.Tool = null;
 
         NoteSurface.Session = _session;
         NoteSurface.Editor = _editor;
@@ -779,11 +781,22 @@ public sealed partial class MainWindow : Window
                     EventTrackKind.Rotate => "旋转",
                     EventTrackKind.Alpha => "透明度",
                     EventTrackKind.Speed => "速度",
+                    EventTrackKind.ScaleX => "缩放 X",
+                    EventTrackKind.ScaleY => "缩放 Y",
+                    EventTrackKind.Color => "颜色",
+                    EventTrackKind.Paint => "着色器",
+                    EventTrackKind.Text => "文本",
                     _ => "数值",
                 };
+                var stringEvent = item.Kind is EventTrackKind.Paint or EventTrackKind.Text;
                 EventInspectorTitle.Text = $"{valueName}事件编辑";
                 EventStartValueLabel.Text = $"{valueName}起点";
                 EventEndValueLabel.Text = $"{valueName}终点";
+                EventStartValuePanel.Visibility = stringEvent ? Visibility.Collapsed : Visibility.Visible;
+                EventEndValuePanel.Visibility = stringEvent ? Visibility.Collapsed : Visibility.Visible;
+                EventSpecialValuePanel.Visibility = stringEvent ? Visibility.Visible : Visibility.Collapsed;
+                EventSpecialValueLabel.Text = item.Kind == EventTrackKind.Paint ? "着色器路径" : "文本内容";
+                EventSpecialValueBox.Text = item.Kind == EventTrackKind.Paint ? item.Color ?? string.Empty : item.Text ?? string.Empty;
                 EventTrackBox.Text = item.Kind.DisplayName();
                 EventStartBeatBox.Text = item.StartBeat.ToString();
                 EventEndBeatBox.Text = item.EndBeat.ToString();
@@ -801,6 +814,9 @@ public sealed partial class MainWindow : Window
                 EventInspectorTitle.Text = "事件属性";
                 EventStartValueLabel.Text = "起点值";
                 EventEndValueLabel.Text = "终点值";
+                EventStartValuePanel.Visibility = Visibility.Visible;
+                EventEndValuePanel.Visibility = Visibility.Visible;
+                EventSpecialValuePanel.Visibility = Visibility.Collapsed;
                 EventTrackBox.Text = string.Empty;
                 EventStartBeatBox.Text = string.Empty;
                 EventEndBeatBox.Text = string.Empty;
@@ -874,40 +890,6 @@ public sealed partial class MainWindow : Window
         _session.Viewport.ScrollToBeat(0);
         PlayGlyph.Glyph = "\uE768";
         RefreshTimeline();
-    }
-
-    private void OnToolClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is not ToggleButton button)
-        {
-            return;
-        }
-
-        var tag = button.Tag as string ?? "select";
-        if (tag == "select")
-        {
-            // 选择模式：不放置音符，空白处拖动即框选。
-            _session.Tool = null;
-            SelectToolButton.IsChecked = true;
-            TapToolButton.IsChecked = false;
-            DragToolButton.IsChecked = false;
-            FlickToolButton.IsChecked = false;
-            HoldToolButton.IsChecked = false;
-            StatusReadout.Text = "工具：选择（框选 / 移动）";
-            return;
-        }
-
-        SelectToolButton.IsChecked = false;
-        _session.Tool = tag switch
-        {
-            "tap" => NoteType.Tap,
-            "drag" => NoteType.Drag,
-            "flick" => NoteType.Flick,
-            "hold" => NoteType.Hold,
-            _ => NoteType.Tap,
-        };
-
-        StatusReadout.Text = $"工具：{_session.Tool}";
     }
 
     private void OnLineSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -992,6 +974,7 @@ public sealed partial class MainWindow : Window
         _session.CurrentLayer = layer;
         _session.SelectedEvents.Clear();
         _session.SelectedNotes.Clear();
+        EditorCanvas.CancelPendingPlacement();
         StatusReadout.Text = $"事件层 {layer}";
         RefreshAll();
     }
@@ -1103,6 +1086,11 @@ public sealed partial class MainWindow : Window
         }
 
         note.Type = (NoteType)(NoteTypeBox.SelectedIndex + 1);
+        if (note.Type == NoteType.Hold && note.EndBeat.Value <= note.StartBeat.Value)
+        {
+            note.EndBeat = Beat.FromValue(note.StartBeat.Value + 1);
+        }
+
         _session.Document.IsDirty = true;
         NoteSurface.Invalidate();
         RefreshInspector();
@@ -1319,6 +1307,13 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (note.Type == NoteType.Hold && note.EndBeat.Value <= note.StartBeat.Value)
+        {
+            StatusReadout.Text = "Hold 终点必须晚于起点";
+            RefreshInspector();
+            return;
+        }
+
         _session.Document.IsDirty = true;
         NoteSurface.Invalidate();
         StatusReadout.Text = "已更新音符时间";
@@ -1348,6 +1343,13 @@ public sealed partial class MainWindow : Window
         catch (FormatException exception)
         {
             StatusReadout.Text = $"拍格式不正确：{exception.Message}";
+            RefreshInspector();
+            return;
+        }
+
+        if (item.EndBeat.Value <= item.StartBeat.Value)
+        {
+            StatusReadout.Text = "事件终点必须晚于起点";
             RefreshInspector();
             return;
         }
@@ -1398,6 +1400,27 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>编辑事件的绑定组。</summary>
+    private void OnEventSpecialValueEdited(object sender, RoutedEventArgs e)
+    {
+        var item = _session.SelectedEvents.FirstOrDefault();
+        if (item is null || item.Kind is not (EventTrackKind.Paint or EventTrackKind.Text))
+        {
+            return;
+        }
+
+        CommitEventChange("修改事件内容", item, target =>
+        {
+            if (target.Kind == EventTrackKind.Paint)
+            {
+                target.Color = EventSpecialValueBox.Text;
+            }
+            else
+            {
+                target.Text = EventSpecialValueBox.Text;
+            }
+        });
+    }
+
     private void OnEventLinkGroupChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
     {
         if (_refreshingInspector)
@@ -1674,23 +1697,19 @@ public sealed partial class MainWindow : Window
                 e.Handled = true;
                 break;
             case VirtualKey.Q:
-                SetTool(TapToolButton, NoteType.Tap);
+                StatusReadout.Text = EditorCanvas.PlaceNoteAtPointer(NoteType.Tap);
                 e.Handled = true;
                 break;
             case VirtualKey.W:
-                SetTool(HoldToolButton, NoteType.Hold);
+                StatusReadout.Text = EditorCanvas.PlaceNoteAtPointer(NoteType.Drag);
                 e.Handled = true;
                 break;
             case VirtualKey.E:
-                SetTool(FlickToolButton, NoteType.Flick);
+                StatusReadout.Text = EditorCanvas.PlaceNoteAtPointer(NoteType.Flick);
                 e.Handled = true;
                 break;
             case VirtualKey.R:
-                SetTool(DragToolButton, NoteType.Drag);
-                e.Handled = true;
-                break;
-            case VirtualKey.V:
-                SetTool(SelectToolButton, null);
+                StatusReadout.Text = EditorCanvas.HandleRKey();
                 e.Handled = true;
                 break;
         }
@@ -1698,17 +1717,6 @@ public sealed partial class MainWindow : Window
 
     private static bool IsTextInputFocused() =>
         FocusManager.GetFocusedElement() is TextBox or ComboBox or Microsoft.UI.Xaml.Controls.NumberBox;
-
-    private void SetTool(ToggleButton button, NoteType? type)
-    {
-        _session.Tool = type;
-        foreach (var other in new[] { SelectToolButton, TapToolButton, DragToolButton, FlickToolButton, HoldToolButton })
-        {
-            other.IsChecked = ReferenceEquals(other, button);
-        }
-
-        StatusReadout.Text = type is null ? "工具：选择（框选 / 移动）" : $"工具：{type}";
-    }
 
     private void TogglePlay()
     {

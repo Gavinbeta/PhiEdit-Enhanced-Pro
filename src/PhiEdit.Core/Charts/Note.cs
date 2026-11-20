@@ -27,6 +27,18 @@ public sealed class Note
     /// <summary>音符尺寸倍率（原版 note.size），影响绘制宽度。</summary>
     public double Size { get; set; } = 1;
 
+    /// <summary>下落朝向：true 为 Up（从下往上）。</summary>
+    public bool IsUp { get; set; } = true;
+
+    /// <summary>音符自身速度倍率。</summary>
+    public double Speed { get; set; } = 1;
+
+    /// <summary>可视时间（秒）。</summary>
+    public double VisibleTime { get; set; } = 999999;
+
+    /// <summary>透明度（0–255）。</summary>
+    public double Alpha { get; set; } = 255;
+
     /// <summary>音效素材相对路径。</summary>
     public string? HitSound { get; set; }
 

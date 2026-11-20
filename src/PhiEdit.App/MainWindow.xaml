@@ -104,12 +104,12 @@
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="10,0,0,0">
                         <TextBlock Text="每拍细分数" Style="{StaticResource StatusTextStyle}" />
-                        <NumberBox x:Name="DivisionBox" Width="76" Minimum="1" Maximum="32" SpinButtonPlacementMode="Compact"
+                        <NumberBox x:Name="DivisionBox" Width="76" Minimum="1" Maximum="32" SpinButtonPlacementMode="Hidden"
                                    ValueChanged="OnDivisionChanged" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="10,0,0,0">
                         <TextBlock Text="竖线数" Style="{StaticResource StatusTextStyle}" />
-                        <NumberBox x:Name="GridCountBox" Width="76" Minimum="2" Maximum="101" SpinButtonPlacementMode="Compact"
+                        <NumberBox x:Name="GridCountBox" Width="76" Minimum="2" Maximum="101" SpinButtonPlacementMode="Hidden"
                                    ValueChanged="OnGridCountChanged" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="10,0,0,0">
@@ -162,7 +162,7 @@
 
                         <!-- 音符属性 -->
                         <StackPanel x:Name="NotesPanel" Padding="14" Spacing="10" Visibility="Collapsed">
-                            <TextBlock Text="音符属性" Style="{StaticResource SectionTitleStyle}" />
+                            <TextBlock Text="音符编辑" Style="{StaticResource SectionTitleStyle}" />
                             <StackPanel Spacing="6">
                                 <TextBlock Text="类型" Style="{StaticResource FieldLabelStyle}" />
                                 <ComboBox x:Name="NoteTypeBox" HorizontalAlignment="Stretch"
@@ -174,27 +174,69 @@
                                 </ComboBox>
                             </StackPanel>
                             <StackPanel Spacing="6">
-                                <TextBlock Text="起始拍" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBlock Text="起始时间" Style="{StaticResource FieldLabelStyle}" />
                                 <TextBox x:Name="NoteStartBeatBox" PlaceholderText="整数:分子/分母"
                                          LostFocus="OnNoteBeatEdited" />
                             </StackPanel>
-                            <StackPanel x:Name="NoteEndBeatPanel" Spacing="6">
-                                <TextBlock Text="结束拍" Style="{StaticResource FieldLabelStyle}" />
+                            <StackPanel x:Name="NoteEndBeatPanel" Spacing="6" Visibility="Collapsed">
+                                <TextBlock Text="结束时间" Style="{StaticResource FieldLabelStyle}" />
                                 <TextBox x:Name="NoteEndBeatBox" PlaceholderText="整数:分子/分母"
                                          LostFocus="OnNoteBeatEdited" />
                             </StackPanel>
                             <StackPanel Spacing="6">
-                                <TextBlock Text="横坐标 X" Style="{StaticResource FieldLabelStyle}" />
-                                <NumberBox x:Name="NotePositionXBox" SpinButtonPlacementMode="Compact"
+                                <TextBlock Text="X坐标" Style="{StaticResource FieldLabelStyle}" />
+                                <NumberBox x:Name="NotePositionXBox" SpinButtonPlacementMode="Hidden"
                                            ValueChanged="OnNotePositionXChanged" />
                             </StackPanel>
                             <StackPanel Spacing="6">
-                                <TextBlock Text="纵坐标 Y" Style="{StaticResource FieldLabelStyle}" />
-                                <NumberBox x:Name="NotePositionYBox" SpinButtonPlacementMode="Compact"
+                                <TextBlock Text="下落朝向" Style="{StaticResource FieldLabelStyle}" />
+                                <ComboBox x:Name="NoteFallDirectionBox" HorizontalAlignment="Stretch"
+                                          SelectionChanged="OnNoteFallDirectionChanged">
+                                    <ComboBoxItem Content="Up" Tag="1" />
+                                    <ComboBoxItem Content="Down" Tag="0" />
+                                </ComboBox>
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="速度" Style="{StaticResource FieldLabelStyle}" />
+                                <NumberBox x:Name="NoteSpeedBox" SpinButtonPlacementMode="Hidden"
+                                           ValueChanged="OnNoteSpeedChanged" />
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="Y值偏移" Style="{StaticResource FieldLabelStyle}" />
+                                <NumberBox x:Name="NotePositionYBox" SpinButtonPlacementMode="Hidden"
                                            ValueChanged="OnNotePositionYChanged" />
                             </StackPanel>
-                            <Button x:Name="DeleteNoteButton" Content="删除音符" HorizontalAlignment="Stretch"
-                                    Style="{StaticResource AccentButtonStyle}" Click="OnDeleteNoteClick" />
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="真值" Style="{StaticResource FieldLabelStyle}" />
+                                <ComboBox x:Name="NoteTruthBox" HorizontalAlignment="Stretch"
+                                          SelectionChanged="OnNoteTruthChanged">
+                                    <ComboBoxItem Content="Real" Tag="1" />
+                                    <ComboBoxItem Content="Fake" Tag="0" />
+                                </ComboBox>
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="宽度" Style="{StaticResource FieldLabelStyle}" />
+                                <NumberBox x:Name="NoteWidthBox" Minimum="0.1" SpinButtonPlacementMode="Hidden"
+                                           ValueChanged="OnNoteWidthChanged" />
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="可视时间/秒" Style="{StaticResource FieldLabelStyle}" />
+                                <NumberBox x:Name="NoteVisibleTimeBox" Minimum="0" SpinButtonPlacementMode="Hidden"
+                                           ValueChanged="OnNoteVisibleTimeChanged" />
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="透明度" Style="{StaticResource FieldLabelStyle}" />
+                                <NumberBox x:Name="NoteAlphaBox" Minimum="0" Maximum="255" SpinButtonPlacementMode="Hidden"
+                                           ValueChanged="OnNoteAlphaChanged" />
+                            </StackPanel>
+                            <Grid ColumnDefinitions="*,*,*" Margin="0,6,0,0">
+                                <Button Grid.Column="0" Content="取消" Margin="0,0,4,0" Click="OnCancelNoteClick"
+                                        HorizontalAlignment="Stretch" />
+                                <Button Grid.Column="1" Content="删除" Margin="4,0,4,0" Click="OnDeleteNoteClick"
+                                        HorizontalAlignment="Stretch" />
+                                <Button Grid.Column="2" Content="保存" Margin="4,0,0,0" Click="OnSaveNoteClick"
+                                        HorizontalAlignment="Stretch" />
+                            </Grid>
                         </StackPanel>
 
                         <!-- 事件属性 -->
@@ -216,36 +258,35 @@
                             </StackPanel>
                             <StackPanel Spacing="6">
                                 <TextBlock x:Name="EventStartValueLabel" Text="起点值" Style="{StaticResource FieldLabelStyle}" />
-                                <NumberBox x:Name="EventStartValueBox" SpinButtonPlacementMode="Compact"
+                                <NumberBox x:Name="EventStartValueBox" SpinButtonPlacementMode="Hidden"
                                            ValueChanged="OnEventValueChanged" />
                             </StackPanel>
                             <StackPanel Spacing="6">
                                 <TextBlock x:Name="EventEndValueLabel" Text="终点值" Style="{StaticResource FieldLabelStyle}" />
-                                <NumberBox x:Name="EventEndValueBox" SpinButtonPlacementMode="Compact"
+                                <NumberBox x:Name="EventEndValueBox" SpinButtonPlacementMode="Hidden"
                                            ValueChanged="OnEventValueChanged" />
                             </StackPanel>
                             <StackPanel Spacing="6">
                                 <TextBlock Text="缓动类型" Style="{StaticResource FieldLabelStyle}" />
                                 <ComboBox x:Name="EventEasingBox" HorizontalAlignment="Stretch"
+                                          MaxDropDownHeight="360"
                                           SelectionChanged="OnEventEasingChanged" />
                             </StackPanel>
                             <Grid ColumnDefinitions="*,*">
                                 <StackPanel Grid.Column="0" Spacing="6" Margin="0,0,6,0">
                                     <TextBlock Text="缓动左边界" Style="{StaticResource FieldLabelStyle}" />
                                     <NumberBox x:Name="EventEasingLeftBox" Minimum="0" Maximum="1" SmallChange="0.05"
-                                               SpinButtonPlacementMode="Compact" ValueChanged="OnEventEasingBoundChanged" />
+                                               SpinButtonPlacementMode="Hidden" ValueChanged="OnEventEasingBoundChanged" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Spacing="6" Margin="6,0,0,0">
                                     <TextBlock Text="缓动右边界" Style="{StaticResource FieldLabelStyle}" />
                                     <NumberBox x:Name="EventEasingRightBox" Minimum="0" Maximum="1" SmallChange="0.05"
-                                               SpinButtonPlacementMode="Compact" ValueChanged="OnEventEasingBoundChanged" />
+                                               SpinButtonPlacementMode="Hidden" ValueChanged="OnEventEasingBoundChanged" />
                                 </StackPanel>
                             </Grid>
-                            <CheckBox x:Name="EventHookedCheck" Content="钩定" Checked="OnEventHookedChanged"
-                                      Unchecked="OnEventHookedChanged" />
                             <StackPanel Spacing="6">
                                 <TextBlock Text="绑定组" Style="{StaticResource FieldLabelStyle}" />
-                                <NumberBox x:Name="EventLinkGroupBox" Minimum="0" SpinButtonPlacementMode="Compact"
+                                <NumberBox x:Name="EventLinkGroupBox" Minimum="0" SpinButtonPlacementMode="Hidden"
                                            ValueChanged="OnEventLinkGroupChanged" />
                             </StackPanel>
 
@@ -300,7 +341,7 @@
                             </StackPanel>
                             <StackPanel Spacing="6">
                                 <TextBlock Text="基础 BPM" Style="{StaticResource FieldLabelStyle}" />
-                                <NumberBox x:Name="BpmBox" Minimum="1" Maximum="999" SpinButtonPlacementMode="Compact"
+                                <NumberBox x:Name="BpmBox" Minimum="1" Maximum="999" SpinButtonPlacementMode="Hidden"
                                            ValueChanged="OnBpmChanged" />
                             </StackPanel>
                             <TextBlock Text="速度表" Style="{StaticResource SectionTitleStyle}" Margin="0,8,0,0" />

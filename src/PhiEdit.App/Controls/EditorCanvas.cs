@@ -1,4 +1,6 @@
 using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.Brushes;
+using Microsoft.Graphics.Canvas.Effects;
 using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -424,18 +426,12 @@ public sealed class EditorCanvas : UserControl
             var x = (float)(left + Palette.GridInsetX + viewport.StageXToPixel(note.PositionX));
             var selected = session.SelectedNotes.Contains(note);
             var highlighted = simultaneous.Contains(note);
-            var alpha = note.IsFake ? 0.45f : 1f;
+            var alpha = (note.IsFake ? 0.45f : 1f) * (float)(Math.Clamp(note.Alpha, 0, 255) / 255);
 
             if (textured && renderer is not null && skin is not null &&
-                DrawTextured(drawing, renderer, skin, note, x, y, endY, scale, highlighted, alpha))
+                DrawTextured(drawing, renderer, skin, note, x, y, endY, scale, highlighted, alpha, selected))
             {
-                if (selected)
-                {
-                    var bounds = NoteBounds(renderer, skin, note, x, y, endY, scale, highlighted);
-                    drawing.FillRectangle(bounds, EditorPalette.WithAlpha(Palette.SelectionFill, 90).ToWinColor());
-                    drawing.DrawRectangle(bounds, Palette.Selection.ToWinColor(), 2f);
-                }
-
+                // 贴图已直接染绿，不再叠加绿色描边；描边只用于无贴图的回退绘制。
                 continue;
             }
 
@@ -490,14 +486,14 @@ public sealed class EditorCanvas : UserControl
     }
 
     private static bool DrawTextured(CanvasDrawingSession drawing, NoteSkinRenderer renderer, NoteSkin skin,
-        Note note, float x, double y, double endY, double scale, bool highlighted, float opacity)
+        Note note, float x, double y, double endY, double scale, bool highlighted, float opacity, bool selected)
     {
         var baseWidth = BaseWidth(scale, note);
         var noteWidth = baseWidth * (highlighted ? skin.HighlightScale : 1);
 
         if (note.Type == NoteType.Hold)
         {
-            return DrawHoldTextured(drawing, renderer, skin, x, y, endY, noteWidth, highlighted, opacity);
+            return DrawHoldTextured(drawing, renderer, skin, x, y, endY, noteWidth, highlighted, opacity, selected);
         }
 
         var name = note.Type switch
@@ -514,14 +510,36 @@ public sealed class EditorCanvas : UserControl
         }
 
         var height = noteWidth * bitmap.Size.Height / Math.Max(1, bitmap.Size.Width);
-        drawing.DrawImage(bitmap,
+        DrawNoteImage(drawing, bitmap,
             new Rect(x - (float)noteWidth / 2, (float)y - (float)height / 2, (float)noteWidth, (float)height),
-            new Rect(0, 0, bitmap.Size.Width, bitmap.Size.Height), opacity);
+            new Rect(0, 0, bitmap.Size.Width, bitmap.Size.Height), opacity, selected);
         return true;
     }
 
+    /// <summary>把贴图直接染成绿色；ColorMatrix 保留原图 alpha，形状不变。</summary>
+    private static void DrawNoteImage(CanvasDrawingSession drawing, Microsoft.Graphics.Canvas.CanvasBitmap bitmap,
+        Rect destination, Rect source, float opacity, bool selected)
+    {
+        if (!selected)
+        {
+            drawing.DrawImage(bitmap, destination, source, opacity);
+            return;
+        }
+
+        var matrix = new Matrix5x4
+        {
+            M11 = 0, M12 = 0, M13 = 0, M14 = 0,
+            M21 = 0, M22 = 0, M23 = 0, M24 = 0,
+            M31 = 0, M32 = 0, M33 = 0, M34 = 0,
+            M41 = 0, M42 = 0, M43 = 0, M44 = 1,
+            M51 = 0, M52 = 1, M53 = 0.15f, M54 = 0,
+        };
+        var effect = new ColorMatrixEffect { Source = bitmap, ColorMatrix = matrix };
+        drawing.DrawImage(effect, destination, source, opacity);
+    }
+
     private static bool DrawHoldTextured(CanvasDrawingSession drawing, NoteSkinRenderer renderer, NoteSkin skin,
-        float x, double y, double endY, double noteWidth, bool highlighted, float opacity)
+        float x, double y, double endY, double noteWidth, bool highlighted, float opacity, bool selected)
     {
         var bitmap = renderer[highlighted ? "hold_mh.png" : "hold.png"];
         if (bitmap is null)
@@ -552,20 +570,20 @@ public sealed class EditorCanvas : UserControl
         var bodyBottom = headY - headHeight;
         if (bodyBottom > bodyTop)
         {
-            drawing.DrawImage(bitmap,
+            DrawNoteImage(drawing, bitmap,
                 new Rect(x - half, (float)bodyTop, (float)noteWidth, (float)(bodyBottom - bodyTop)),
-                new Rect(0, tailPixels, bitmap.Size.Width, bodyPixels), opacity);
+                new Rect(0, tailPixels, bitmap.Size.Width, bodyPixels), opacity, selected);
         }
 
-        drawing.DrawImage(bitmap,
+        DrawNoteImage(drawing, bitmap,
             new Rect(x - half, (float)(headY - headHeight), (float)noteWidth, (float)headHeight),
-            new Rect(0, imageHeight - headPixels, bitmap.Size.Width, headPixels), opacity);
+            new Rect(0, imageHeight - headPixels, bitmap.Size.Width, headPixels), opacity, selected);
 
         if (tailHeight > 0)
         {
-            drawing.DrawImage(bitmap,
+            DrawNoteImage(drawing, bitmap,
                 new Rect(x - half, (float)tailY, (float)noteWidth, (float)tailHeight),
-                new Rect(0, 0, bitmap.Size.Width, tailPixels), opacity);
+                new Rect(0, 0, bitmap.Size.Width, tailPixels), opacity, selected);
         }
 
         return true;
@@ -617,13 +635,19 @@ public sealed class EditorCanvas : UserControl
                 var rectBottom = (float)Math.Min(height, bottom);
                 var rectHeight = Math.Max(2f, rectBottom - rectTop);
                 var selected = session.SelectedEvents.Contains(item);
-                var fill = selected ? Palette.EventFillSelected : Palette.EventFill;
-                var stroke = selected ? Palette.EventStrokeSelected : Palette.EventStroke;
+                var fillTop = Windows.UI.Color.FromArgb(210, 112, 231, 226);
+                var fillBottom = Windows.UI.Color.FromArgb(210, 236, 182, 218);
+                using var gradient = new CanvasLinearGradientBrush(drawing, fillTop, fillBottom)
+                {
+                    StartPoint = new Vector2((float)(barX + barWidth / 2), rectTop),
+                    EndPoint = new Vector2((float)(barX + barWidth / 2), rectBottom),
+                };
+                drawing.FillRectangle(new Rect(barX, rectTop, (float)barWidth, rectHeight), gradient);
 
-                drawing.FillRectangle(new Rect(barX, rectTop, (float)barWidth, rectHeight),
-                    EditorPalette.WithAlpha(fill, 64).ToWinColor());
-                drawing.DrawRectangle(new Rect(barX, rectTop, (float)barWidth, rectHeight), stroke.ToWinColor(),
-                    selected ? 2f : 1f);
+                // 事件条中央白线与加粗的橙色缓动曲线。
+                var centerX = barX + (float)barWidth / 2;
+                drawing.DrawLine(centerX, rectTop, centerX, rectBottom,
+                    Windows.UI.Color.FromArgb(190, 255, 255, 255), 1f);
                 DrawEasingCurve(drawing, item, barX, (float)barWidth, rectTop, rectBottom, rangeMin, rangeMax);
             }
         }
@@ -653,7 +677,7 @@ public sealed class EditorCanvas : UserControl
                 bottom - (float)progress * (bottom - top));
             if (previous is Vector2 last)
             {
-                drawing.DrawLine(last, point, color, 1.5f);
+                drawing.DrawLine(last, point, color, Palette.BeatLineWidth);
             }
 
             previous = point;

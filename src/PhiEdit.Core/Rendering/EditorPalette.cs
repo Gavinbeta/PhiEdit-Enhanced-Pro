@@ -37,10 +37,10 @@ public sealed class EditorPalette
     public Color MinorSubdivision { get; set; } = Color.FromArgb(255, 74, 168, 78);
 
     /// <summary>细分线宽度（像素）。</summary>
-    public float SubdivisionWidth { get; set; } = 4.5f;
+    public float SubdivisionWidth { get; set; } = 3.5f;
 
-    /// <summary>次级细分线宽度（像素）。</summary>
-    public float MinorSubdivisionWidth { get; set; } = 3f;
+    /// <summary>次级细分线宽度（像素，与细分线一致）。</summary>
+    public float MinorSubdivisionWidth { get; set; } = 3.5f;
 
     /// <summary>细分线不透明度。</summary>
     public byte SubdivisionAlpha { get; set; } = 150;

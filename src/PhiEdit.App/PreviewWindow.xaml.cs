@@ -1,5 +1,6 @@
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using PhiEdit.App.Controls;
 using PhiEdit.Core.Editing;
 using PhiEdit.Core.Preview;
@@ -16,6 +17,7 @@ public sealed partial class PreviewWindow : Window
     private readonly PreviewClock _clock = new();
     private readonly DispatcherQueueTimer _timer;
     private readonly EditorSession _session;
+    private bool _updatingSeek;
 
     public PreviewWindow(EditorSession session)
     {
@@ -84,9 +86,37 @@ public sealed partial class PreviewWindow : Window
 
     private void UpdateTimeReadout()
     {
+        var tempo = _session.Document.BuildTempoMap();
         var seconds = _clock.CurrentSeconds;
-        var beat = _session.Document.BuildTempoMap().BeatAt(seconds);
+        var beat = tempo.BeatAt(seconds);
         TimeReadout.Text = $"{seconds:0.000} s   /   {beat:0.00} 拍";
+
+        _updatingSeek = true;
+        SeekSlider.Maximum = Math.Max(1, tempo.SecondsAt(_session.Document.LastBeat + 4));
+        SeekSlider.Value = Math.Clamp(seconds, SeekSlider.Minimum, SeekSlider.Maximum);
+        _updatingSeek = false;
+    }
+
+    private void OnSeekSliderChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (_updatingSeek)
+        {
+            return;
+        }
+
+        _clock.Seek(e.NewValue);
+        PreviewSurface.Invalidate();
+        TimeReadout.Text = $"{e.NewValue:0.000} s";
+    }
+
+    private void OnRateChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _clock.Rate = RateBox.SelectedIndex switch
+        {
+            0 => 0.5,
+            2 => 2.0,
+            _ => 1.0,
+        };
     }
 
     private void OnClosed(object sender, WindowEventArgs args)

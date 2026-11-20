@@ -16,6 +16,7 @@ public class RpeJsonTests
             SongArtist = "测试作者",
             ChartName = "Expert",
             Difficulty = "12",
+            Background = "Resources/bg.png",
         };
 
         var line = chart.AddLine();
@@ -24,6 +25,8 @@ public class RpeJsonTests
             Type = NoteType.Flick,
             StartBeat = Beat.FromValue(4.5),
             PositionX = -120.5,
+            Tint = new[] { 10.0, 20.0, 30.0 },
+            TintHitEffects = new[] { 40.0, 50.0, 60.0 },
         });
 
         line.AddEvent(new LineEvent
@@ -45,6 +48,7 @@ public class RpeJsonTests
         Assert.Equal("测试歌曲", restored.SongName);
         Assert.Equal("测试作者", restored.SongArtist);
         Assert.Equal("Expert", restored.ChartName);
+        Assert.Equal("Resources/bg.png", restored.Background);
         Assert.Single(restored.Lines);
 
         var restoredLine = restored.Lines[0];
@@ -52,6 +56,8 @@ public class RpeJsonTests
         Assert.Equal(NoteType.Flick, restoredLine.Notes[0].Type);
         Assert.Equal(4.5, restoredLine.Notes[0].StartBeat.Value, 6);
         Assert.Equal(-120.5, restoredLine.Notes[0].PositionX, 6);
+        Assert.Equal(new[] { 10.0, 20.0, 30.0 }, restoredLine.Notes[0].Tint);
+        Assert.Equal(new[] { 40.0, 50.0, 60.0 }, restoredLine.Notes[0].TintHitEffects);
 
         var rotate = restoredLine.Track(EventTrackKind.Rotate);
         Assert.Single(rotate);

@@ -110,13 +110,28 @@ public sealed partial class MainWindow : Window
             LayerButtons.Children.Add(button);
         }
 
-        BuildSampleChart();
+        LoadDefaultChart();
         RefreshAll();
 
         RootLayout.Loaded += async (_, _) => await InitializeSkinsAsync();
     }
 
     // ---------------------------------------------------------------- 初始化
+
+    /// <summary>默认加载内置的示例 PEZ；缺失时退回到最小示例谱面。</summary>
+    private void LoadDefaultChart()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "Assets", "SampleCharts", "16266666.pez");
+        if (File.Exists(path))
+        {
+            LoadChartPath(path);
+            _session.Viewport.SetPosition(71.81);
+            _clock.SeekToBeat(71.81);
+            return;
+        }
+
+        BuildSampleChart();
+    }
 
     /// <summary>建立一个含示例内容的谱面，便于首次打开即可观察编辑界面。</summary>
     private void BuildSampleChart()
@@ -1959,14 +1974,30 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        LoadChartPath(file.Path);
+    }
+
+    /// <summary>供命令行或自动化测试直接打开谱面文件。</summary>
+    public void OpenStartupFile(string path) => LoadChartPath(path);
+
+    /// <summary>供命令行或自动化测试跳转到指定拍。</summary>
+    public void SetStartupBeat(double beat)
+    {
+        _session.Viewport.SetPosition(beat);
+        _clock.SeekToBeat(beat);
+        RefreshTimeline();
+    }
+
+    private void LoadChartPath(string path)
+    {
         try
         {
             ChartAssetStore assets;
             string text;
-            var extension = Path.GetExtension(file.Path).ToLowerInvariant();
+            var extension = Path.GetExtension(path).ToLowerInvariant();
             if (extension is ".pez" or ".zip")
             {
-                var archive = File.ReadAllBytes(file.Path);
+                var archive = File.ReadAllBytes(path);
                 assets = ChartAssetStore.FromZip(archive);
                 var chartName = assets.FindChart();
                 var chartBytes = chartName is null ? null : assets.Resolve(chartName);
@@ -1980,8 +2011,8 @@ public sealed partial class MainWindow : Window
             }
             else
             {
-                text = await FileIO.ReadTextAsync(file);
-                assets = ChartAssetStore.FromDirectory(Path.GetDirectoryName(file.Path) ?? string.Empty);
+                text = File.ReadAllText(path);
+                assets = ChartAssetStore.FromDirectory(Path.GetDirectoryName(path) ?? string.Empty);
             }
 
             var document = RpeJson.Read(text);
@@ -1991,9 +2022,10 @@ public sealed partial class MainWindow : Window
             _session.Undo.Clear();
             _session.ClearSelection();
             _clock.Reset();
-            _currentFilePath = file.Path;
+            _session.Viewport.ScrollToBeat(0);
+            _currentFilePath = path;
             RefreshAll();
-            StatusReadout.Text = $"已打开 {file.Name}";
+            StatusReadout.Text = $"已打开 {Path.GetFileName(path)}";
         }
         catch (Exception exception)
         {

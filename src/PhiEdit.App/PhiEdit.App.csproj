@@ -19,10 +19,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>PhiEdit.App</RootNamespace>
     <ApplicationTitle>PhiEdit Enhanced Pro</ApplicationTitle>
-    <Version>1.2.2-BETA2</Version>
+    <Version>1.2.2-BETA3</Version>
     <AssemblyVersion>1.2.2.0</AssemblyVersion>
     <FileVersion>1.2.2.0</FileVersion>
-    <AssemblyInformationalVersion>1.2.2_BETA2</AssemblyInformationalVersion>
+    <AssemblyInformationalVersion>1.2.2_BETA3</AssemblyInformationalVersion>
     <Company>PhiEdit Enhanced Pro</Company>
     <Description>基于 Re:PhiEdit 逻辑重制的 WinUI 3 制谱器</Description>
   </PropertyGroup>
@@ -42,6 +42,8 @@
     <Content Include="Assets\NoteSkins\*.zip" CopyToOutputDirectory="PreserveNewest" />
     <!-- 原版默认 RPE 贴图：实时预览层按参考源码还原时使用 -->
     <Content Include="Assets\RpeTextures\*.png" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 默认谱面：启动即加载，便于对照原版渲染 -->
+    <Content Include="Assets\SampleCharts\*.pez" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

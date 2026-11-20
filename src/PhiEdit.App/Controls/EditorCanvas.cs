@@ -204,21 +204,21 @@ public sealed class EditorCanvas : UserControl
         viewport.ViewportHeight = height;
 
         var layout = Layout(width);
-        viewport.NoteWidth = layout.LeftWidth;
+        // 竖线网格与红/绿横线使用同一段可用宽度：左右各让出 GridInsetX。
+        viewport.NoteWidth = Math.Max(80, layout.LeftWidth - Palette.GridInsetX * 2);
 
-        drawing.FillRectangle(new Rect(0, 0, (float)layout.LeftWidth, (float)height), Palette.Surface.ToWinColor());
-        drawing.FillRectangle(new Rect((float)layout.RightLeft, 0, (float)layout.RightWidth, (float)height),
-            Palette.SurfaceAlt.ToWinColor());
-        drawing.FillRectangle(new Rect((float)layout.LeftWidth, 0, (float)GutterWidth, (float)height),
-            Palette.PanelHeader.ToWinColor());
+        // 两侧底色一致，中间不再画灰色区域，视觉上是一块连续画布。
+        drawing.FillRectangle(new Rect(0, 0, (float)width, (float)height), Palette.Surface.ToWinColor());
 
         var playheadY = viewport.PlayheadY;
-        DrawTimeGrid(drawing, session, viewport, 0, layout.LeftWidth, playheadY, true);
-        DrawVerticalGrid(drawing, session, viewport, 0, layout.LeftWidth, playheadY);
+        DrawTimeGrid(drawing, session, viewport, 0, layout.LeftWidth, playheadY,
+            layout.LeftWidth + GutterWidth / 2);
+        DrawVerticalGrid(drawing, session, 0, layout.LeftWidth, playheadY);
         DrawNotes(drawing, session, viewport, 0, layout.LeftWidth, height);
 
-        DrawTimeGrid(drawing, session, viewport, layout.RightLeft, layout.RightWidth, playheadY, true);
-        DrawChannelSeparators(drawing, layout.RightLeft, layout.RightWidth, playheadY);
+        DrawTimeGrid(drawing, session, viewport, layout.RightLeft, layout.RightWidth, playheadY,
+            width - 14);
+        DrawVerticalGrid(drawing, session, layout.RightLeft, layout.RightWidth, playheadY);
         DrawEvents(drawing, session, viewport, layout.RightLeft, layout.RightWidth, height);
         DrawHeader(drawing, layout.RightLeft, layout.RightWidth);
         DrawFooter(drawing, session, layout.RightLeft, layout.RightWidth, height);
@@ -228,15 +228,19 @@ public sealed class EditorCanvas : UserControl
         DrawMarquee(drawing);
     }
 
-    private void DrawVerticalGrid(CanvasDrawingSession drawing, EditorSession session, EditViewport viewport,
+    private void DrawVerticalGrid(CanvasDrawingSession drawing, EditorSession session,
         double left, double width, double playheadY)
     {
         var gridTop = (float)Palette.GridInsetTop;
-        var gridBottom = (float)Math.Max(gridTop, playheadY - Palette.GridInsetBottom);
+        // 竖线一直画到判定线；灰线会盖住它压在判定线上的部分。
+        var gridBottom = (float)Math.Max(gridTop, playheadY);
+        var gridLeft = left + Palette.GridInsetX;
+        var gridRight = left + width - Palette.GridInsetX;
+        var span = Math.Max(1, gridRight - gridLeft);
         foreach (var stageX in session.Grid.Lines())
         {
-            var x = (float)(left + viewport.StageXToPixel(stageX));
-            if (x < left - 2 || x > left + width + 2)
+            var x = (float)(gridLeft + (stageX + VerticalGrid.StageHalfWidth) / VerticalGrid.StageWidth * span);
+            if (x < gridLeft - 2 || x > gridRight + 2)
             {
                 continue;
             }
@@ -249,13 +253,13 @@ public sealed class EditorCanvas : UserControl
     }
 
     private void DrawTimeGrid(CanvasDrawingSession drawing, EditorSession session, EditViewport viewport,
-        double left, double width, double playheadY, bool showLabels)
+        double left, double width, double playheadY, double labelX)
     {
         var gridLeft = (float)(left + Palette.GridInsetX);
         var gridRight = (float)Math.Max(gridLeft + 1, left + width - Palette.GridInsetX);
         var gridTop = Palette.GridInsetTop;
         var gridBottom = Math.Max(gridTop, playheadY - Palette.GridInsetBottom);
-        var format = CanvasExtensions.TextFormat(12f, right: true);
+        var format = CanvasExtensions.TextFormat(22f, center: true, bold: true);
 
         foreach (var tick in GridLayout.Ticks(viewport.BottomBeat - 1, viewport.TopBeat + 1, session.Division))
         {
@@ -274,11 +278,8 @@ public sealed class EditorCanvas : UserControl
             {
                 case GridTickKind.Beat:
                     drawing.DrawLine(gridLeft, (float)y, gridRight, (float)y, Palette.BeatLine.ToWinColor(), Palette.BeatLineWidth);
-                    if (showLabels)
-                    {
-                        drawing.DrawText(tick.Beat.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
-                            new Vector2(gridRight - 4, (float)(y - 16)), Palette.BeatLabel.ToWinColor(), format);
-                    }
+                    drawing.DrawText(tick.Beat.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
+                        new Vector2((float)labelX, (float)(y - 12)), Palette.BeatLabel.ToWinColor(), format);
                     break;
                 case GridTickKind.Subdivision:
                     drawing.DrawLine(gridLeft, (float)y, gridRight, (float)y,
@@ -420,7 +421,7 @@ public sealed class EditorCanvas : UserControl
                 continue;
             }
 
-            var x = (float)(left + viewport.StageXToPixel(note.PositionX));
+            var x = (float)(left + Palette.GridInsetX + viewport.StageXToPixel(note.PositionX));
             var selected = session.SelectedNotes.Contains(note);
             var highlighted = simultaneous.Contains(note);
             var alpha = note.IsFake ? 0.45f : 1f;
@@ -849,6 +850,7 @@ public sealed class EditorCanvas : UserControl
 
         var viewport = _session.Viewport;
         var beat = SnapBeat(viewport.BeatAtY(position.Y));
+        var leftWidth = Layout(_canvas.ActualWidth).LeftWidth;
 
         if (_dragNote is not null)
         {
@@ -858,7 +860,8 @@ public sealed class EditorCanvas : UserControl
                 return;
             }
 
-            var stageX = SnapX(viewport.PixelToStageX(position.X));
+            var clampedX = ClampNotePixel(position.X, leftWidth);
+            var stageX = SnapX(viewport.PixelToStageX(clampedX - Palette.GridInsetX));
             var origin = _noteOrigins[0];
             var deltaBeat = beat - origin.Beat;
             var deltaX = stageX - origin.X;
@@ -907,6 +910,14 @@ public sealed class EditorCanvas : UserControl
     }
 
     private double SnapX(double stageX) => _session!.SnapX ? _session.Grid.Snap(stageX) : stageX;
+
+    /// <summary>音符中心不得越过音符区左右两条封闭黄线。</summary>
+    private double ClampNotePixel(double x, double leftWidth)
+    {
+        var first = Palette.GridInsetX;
+        var last = Math.Max(first + 1, leftWidth - Palette.GridInsetX);
+        return Math.Clamp(x, first, last);
+    }
 
     private void OnPointerReleased(object sender, PointerRoutedEventArgs e)
     {
@@ -1055,7 +1066,8 @@ public sealed class EditorCanvas : UserControl
         }
 
         var beat = SnapBeat(_session.Viewport.BeatAtY(y));
-        var stageX = SnapX(_session.Viewport.PixelToStageX(x));
+        var clampedX = ClampNotePixel(x, Layout(_canvas.ActualWidth).LeftWidth);
+        var stageX = SnapX(_session.Viewport.PixelToStageX(clampedX - Palette.GridInsetX));
         var note = _editor.PlaceNote(_session.CurrentLine, _session.Tool!.Value, Beat.FromValue(beat), stageX);
         _session.SelectedNotes.Clear();
         _session.SelectedNotes.Add(note);
@@ -1106,7 +1118,7 @@ public sealed class EditorCanvas : UserControl
         {
             var noteY = viewport.YAtBeat(note.StartBeat.Value);
             var endY = viewport.YAtBeat(note.EndBeat.Value);
-            var noteX = viewport.StageXToPixel(note.PositionX);
+            var noteX = Palette.GridInsetX + viewport.StageXToPixel(note.PositionX);
             var noteWidth = BaseWidth(scale, note);
             if (Math.Abs(noteX - x) > noteWidth / 2 + 2)
             {

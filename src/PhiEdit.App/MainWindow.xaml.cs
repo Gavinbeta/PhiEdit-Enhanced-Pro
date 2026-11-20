@@ -963,6 +963,14 @@ public sealed partial class MainWindow : Window
         }
 
         button.IsChecked = true;
+        // 回到“音符/事件”页签时必须按当前选择重建面板，
+        // 否则从判定线页签切回后只会显示空白的“编辑”提示。
+        if (ReferenceEquals(button, TabEdit))
+        {
+            RefreshInspector();
+            return;
+        }
+
         ShowInspectorTab(tag);
     }
 
@@ -1169,6 +1177,8 @@ public sealed partial class MainWindow : Window
         item.Easing = EventEasingBox.SelectedIndex + 1;
         _session.Document.IsDirty = true;
         EventSurface.Invalidate();
+        RefreshInspector();
+        StatusReadout.Text = "已更新缓动类型";
     }
 
     /// <summary>编辑事件的绑定组。</summary>

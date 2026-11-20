@@ -59,7 +59,7 @@ dotnet test src/PhiEdit.Core.Tests/PhiEdit.Core.Tests.csproj
 ## 音符资源包（贴图）
 
 程序支持 RPE 的**音符资源包**（Note Skin）机制：资源包是一个 ZIP，内含 `info.yml` 清单、
-9 张必���贴图（`click/drag/flick/hold` 的普通与命中高亮版 + `hit_fx`）以及可选音效。
+9 张必备贴图（`click/drag/flick/hold` 的普通与命中高亮版 + `hit_fx`）以及可选音效。
 
 - 内置资源包：随程序分发的 `高仿官皮新版`（`src/PhiEdit.App/Assets/NoteSkins/`），
   启动即加载并生效，音符按贴图绘制（含 Hold 的头/身/尾三段图集）。

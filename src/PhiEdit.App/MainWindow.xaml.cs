@@ -884,6 +884,8 @@ public sealed partial class MainWindow : Window
 
     private async void OnOpenClick(object sender, RoutedEventArgs e) => await OpenChart();
 
+    private async void OnImportPezClick(object sender, RoutedEventArgs e) => await OpenChart(pezOnly: true);
+
     private async void OnSaveClick(object sender, RoutedEventArgs e) => await SaveChart();
 
     private async void OnExportClick(object sender, RoutedEventArgs e) => await ExportChart();
@@ -1940,11 +1942,14 @@ public sealed partial class MainWindow : Window
 
     private IntPtr GetWindowHandle() => WindowNative.GetWindowHandle(this);
 
-    private async Task OpenChart()
+    private async Task OpenChart(bool pezOnly = false)
     {
         var picker = new FileOpenPicker();
-        picker.FileTypeFilter.Add(".json");
-        picker.FileTypeFilter.Add(".pec");
+        if (!pezOnly)
+        {
+            picker.FileTypeFilter.Add(".json");
+            picker.FileTypeFilter.Add(".pec");
+        }
         picker.FileTypeFilter.Add(".pez");
         picker.FileTypeFilter.Add(".zip");
         InitializeWithWindow.Initialize(picker, GetWindowHandle());
@@ -1963,9 +1968,7 @@ public sealed partial class MainWindow : Window
             {
                 var archive = File.ReadAllBytes(file.Path);
                 assets = ChartAssetStore.FromZip(archive);
-                var chartName = assets.Names.FirstOrDefault(name =>
-                    name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ||
-                    name.EndsWith(".pec", StringComparison.OrdinalIgnoreCase));
+                var chartName = assets.FindChart();
                 var chartBytes = chartName is null ? null : assets.Resolve(chartName);
                 if (chartBytes is null)
                 {
@@ -2001,7 +2004,7 @@ public sealed partial class MainWindow : Window
     private async Task SaveChart()
     {
         var path = _currentFilePath;
-        if (string.IsNullOrEmpty(path))
+        if (string.IsNullOrEmpty(path) || Path.GetExtension(path).ToLowerInvariant() is ".pez" or ".zip")
         {
             await ExportChart();
             return;

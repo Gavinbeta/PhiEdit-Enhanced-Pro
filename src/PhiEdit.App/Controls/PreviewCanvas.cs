@@ -366,7 +366,7 @@ public sealed class PreviewCanvas : UserControl
                     var noteWidth = (float)(LogicalNoteSize * scale * position.Size);
                     var heightWidth = (float)(LogicalNoteSize * scale * position.SizeY);
                     var highlight = _scene.Simultaneous.Contains(entry.Note);
-                    var tint = entry.Note.Tint ?? entry.Note.Color ?? DefaultNoteColor(entry.Note.Type);
+                    var tint = entry.Note.Tint ?? entry.Note.Color;
                     var pack = _packRenderer.IsReady ? _packRenderer.Skin : null;
                     var textureScale = highlight && pack is not null ? pack.HighlightScale : 1;
                     noteWidth *= (float)textureScale;
@@ -460,7 +460,7 @@ public sealed class PreviewCanvas : UserControl
     }
 
     private void DrawNote(CanvasDrawingSession drawing, Note note, float centerX, float headY, float tailY,
-        float width, float heightWidth, bool highlight, bool showHead, double[] tint, float alpha)
+        float width, float heightWidth, bool highlight, bool showHead, double[]? tint, float alpha)
     {
         if (note.Type == NoteType.Hold)
         {
@@ -497,7 +497,7 @@ public sealed class PreviewCanvas : UserControl
         var bitmap = _textures[name];
         if (bitmap is null)
         {
-            drawing.FillRectangle(new Rect(centerX - width / 2, headY - 2, width, 4), Rgb(tint));
+            drawing.FillRectangle(new Rect(centerX - width / 2, headY - 2, width, 4), Rgb(tint ?? DefaultNoteColor(note.Type)));
             return;
         }
 
@@ -507,7 +507,7 @@ public sealed class PreviewCanvas : UserControl
     }
 
     private void DrawHold(CanvasDrawingSession drawing, Note note, float centerX, float headY, float tailY,
-        float width, float heightWidth, bool highlight, bool showHead, double[] tint, float alpha)
+        float width, float heightWidth, bool highlight, bool showHead, double[]? tint, float alpha)
     {
         var pack = _packRenderer.IsReady ? _packRenderer.Skin : null;
         if (pack is not null)
@@ -561,7 +561,7 @@ public sealed class PreviewCanvas : UserControl
 
     private void DrawPackHold(CanvasDrawingSession drawing, NoteSkin skin, float centerX, float headY, float tailY,
         float width, float heightWidth, bool highlight, bool showHead, bool isUp,
-        IReadOnlyList<double> tint, float alpha)
+        IReadOnlyList<double>? tint, float alpha)
     {
         var bitmap = _packRenderer[highlight ? "hold_mh.png" : "hold.png"];
         if (bitmap is null)

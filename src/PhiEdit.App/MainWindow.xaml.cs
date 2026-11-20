@@ -41,6 +41,8 @@ public sealed partial class MainWindow : Window
 
     private Note? _noteEditSnapshot;
 
+    private readonly HashSet<VirtualKey> _heldPlacementKeys = new();
+
     // 单一画布：这些别名让既有调用保持兼容，实际都指向同一块 EditorCanvas。
     private EditorCanvas NoteSurface => EditorCanvas;
     private EditorCanvas EventSurface => EditorCanvas;
@@ -824,7 +826,6 @@ public sealed partial class MainWindow : Window
                     "speed" => 2,
                     _ => 0,
                 };
-                EventTrackBox.Text = item.Kind.DisplayName();
                 EventStartBeatBox.Text = item.StartBeat.ToString();
                 EventEndBeatBox.Text = item.EndBeat.ToString();
                 EventStartValueBox.Value = item.StartValue;
@@ -851,7 +852,6 @@ public sealed partial class MainWindow : Window
                 EventActionGrid.Visibility = Visibility.Visible;
                 EventHookedCheck.Visibility = Visibility.Visible;
                 EventHookedCheck.IsChecked = false;
-                EventTrackBox.Text = string.Empty;
                 EventStartBeatBox.Text = string.Empty;
                 EventEndBeatBox.Text = string.Empty;
                 EventEasingLeftBox.Value = 0;
@@ -1858,36 +1858,32 @@ public sealed partial class MainWindow : Window
                 DeleteSelection();
                 e.Handled = true;
                 break;
+            case VirtualKey.Q:
+            case VirtualKey.W:
+            case VirtualKey.E:
+            case VirtualKey.R:
+                // 按下即放置；同一按键在松开前产生的重复 KeyDown 全部忽略。
+                if (_heldPlacementKeys.Add(e.Key))
+                {
+                    StatusReadout.Text = e.Key switch
+                    {
+                        VirtualKey.Q => EditorCanvas.PlaceNoteAtPointer(NoteType.Tap),
+                        VirtualKey.W => EditorCanvas.PlaceNoteAtPointer(NoteType.Drag),
+                        VirtualKey.E => EditorCanvas.PlaceNoteAtPointer(NoteType.Flick),
+                        _ => EditorCanvas.HandleRKey(),
+                    };
+                }
+
+                e.Handled = true;
+                break;
         }
     }
 
-    /// <summary>物件放置只在按键松开时触发，避免按住键重复放置。</summary>
+    /// <summary>松开后释放按键锁，下一次按下才能再次放置。</summary>
     private void OnRootKeyUp(object sender, KeyRoutedEventArgs e)
     {
-        if (IsTextInputFocused())
-        {
-            return;
-        }
-
-        switch (e.Key)
-        {
-            case VirtualKey.Q:
-                StatusReadout.Text = EditorCanvas.PlaceNoteAtPointer(NoteType.Tap);
-                e.Handled = true;
-                break;
-            case VirtualKey.W:
-                StatusReadout.Text = EditorCanvas.PlaceNoteAtPointer(NoteType.Drag);
-                e.Handled = true;
-                break;
-            case VirtualKey.E:
-                StatusReadout.Text = EditorCanvas.PlaceNoteAtPointer(NoteType.Flick);
-                e.Handled = true;
-                break;
-            case VirtualKey.R:
-                StatusReadout.Text = EditorCanvas.HandleRKey();
-                e.Handled = true;
-                break;
-        }
+        _heldPlacementKeys.Remove(e.Key);
+        e.Handled = e.Key is VirtualKey.Q or VirtualKey.W or VirtualKey.E or VirtualKey.R;
     }
 
     private static bool IsTextInputFocused() =>

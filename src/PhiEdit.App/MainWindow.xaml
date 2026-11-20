@@ -223,10 +223,6 @@
                         <StackPanel x:Name="EventsPanel" Padding="14" Spacing="10" Visibility="Collapsed">
                             <TextBlock x:Name="EventInspectorTitle" Text="事件属性" Style="{StaticResource SectionTitleStyle}" />
                             <StackPanel Spacing="6">
-                                <TextBlock Text="轨道" Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox x:Name="EventTrackBox" IsReadOnly="True" />
-                            </StackPanel>
-                            <StackPanel Spacing="6">
                                 <TextBlock Text="起始时间" Style="{StaticResource FieldLabelStyle}" />
                                 <TextBox x:Name="EventStartBeatBox" PlaceholderText="整数:分子/分母"
                                          LostFocus="OnEventBeatEdited" />

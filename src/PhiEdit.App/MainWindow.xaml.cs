@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using PhiEdit.App.Controls;
 using PhiEdit.App.Services;
 using PhiEdit.Core.Beats;
@@ -37,6 +38,8 @@ public sealed partial class MainWindow : Window
 
     private string? _currentFilePath;
 
+    private bool _refreshingInspector;
+
     public MainWindow()
     {
         _editor = new ChartEditor(_session);
@@ -53,6 +56,8 @@ public sealed partial class MainWindow : Window
         NoteSurface.Editor = _editor;
         NoteSurface.Palette = _palette;
         NoteSurface.Renderer = _skinRenderer;
+        BeatRuler.Session = _session;
+        BeatRuler.Palette = _palette;
         EventSurface.Session = _session;
         EventSurface.Editor = _editor;
         EventSurface.Palette = _palette;
@@ -588,7 +593,7 @@ public sealed partial class MainWindow : Window
     {
         // 使用星号单位：窗口变窄时两个编辑区等比收缩，绝不会被右侧面板遮挡。
         EditorArea.ColumnDefinitions[0].Width = new GridLength(_editorSplitRatio, GridUnitType.Star);
-        EditorArea.ColumnDefinitions[1].Width = new GridLength(6);
+        EditorArea.ColumnDefinitions[1].Width = new GridLength(28);
         EditorArea.ColumnDefinitions[2].Width = new GridLength(1 - _editorSplitRatio, GridUnitType.Star);
 
         if (WorkspaceArea.ColumnDefinitions.Count >= 3)
@@ -624,6 +629,7 @@ public sealed partial class MainWindow : Window
         RefreshTimeline();
         NoteSurface.Invalidate();
         EventSurface.Invalidate();
+        BeatRuler.Invalidate();
     }
 
 
@@ -637,6 +643,7 @@ public sealed partial class MainWindow : Window
         RefreshTimeline();
         NoteSurface.Invalidate();
         EventSurface.Invalidate();
+        BeatRuler.Invalidate();
     }
 
     private void RefreshTimeline()
@@ -702,44 +709,94 @@ public sealed partial class MainWindow : Window
 
     private void RefreshInspector()
     {
-        UpdateInspectorTab();
-        RefreshSelectionInfo();
+        _refreshingInspector = true;
+        try
+        {
+            UpdateInspectorTab();
+            RefreshSelectionInfo();
 
-        var note = _session.SelectedNotes.FirstOrDefault();
-        if (note is not null)
-        {
-            NotesPanel.Visibility = Visibility.Visible;
-            NoteTypeBox.SelectedIndex = (int)note.Type - 1;
-            NoteStartBeatBox.Text = note.StartBeat.ToString();
-            NoteEndBeatBox.Text = note.EndBeat.ToString();
-            // 只有 Hold 是有长度的音符，其余为瞬时音符，不显示结束拍。
-            NoteEndBeatPanel.Visibility = note.Type == NoteType.Hold ? Visibility.Visible : Visibility.Collapsed;
-            NotePositionXBox.Value = note.PositionX;
-            NotePositionYBox.Value = note.PositionY;
+            var note = _session.SelectedNotes.FirstOrDefault();
+            if (note is not null)
+            {
+                NotesPanel.Visibility = Visibility.Visible;
+                NoteTypeBox.SelectedIndex = (int)note.Type - 1;
+                NoteStartBeatBox.Text = note.StartBeat.ToString();
+                NoteEndBeatBox.Text = note.EndBeat.ToString();
+                // 只有 Hold 是有长度的音符，其余为瞬时音符，不显示结束拍。
+                NoteEndBeatPanel.Visibility = note.Type == NoteType.Hold ? Visibility.Visible : Visibility.Collapsed;
+                NotePositionXBox.Value = note.PositionX;
+                NotePositionYBox.Value = note.PositionY;
+            }
+            else
+            {
+                NoteStartBeatBox.Text = string.Empty;
+                NoteEndBeatBox.Text = string.Empty;
+            }
+
+            var item = _session.SelectedEvents.FirstOrDefault();
+            if (item is not null)
+            {
+                var valueName = item.Kind switch
+                {
+                    EventTrackKind.X => "X 坐标",
+                    EventTrackKind.Y => "Y 坐标",
+                    EventTrackKind.Rotate => "旋转",
+                    EventTrackKind.Alpha => "透明度",
+                    EventTrackKind.Speed => "速度",
+                    _ => "数值",
+                };
+                EventInspectorTitle.Text = $"{valueName}事件编辑";
+                EventStartValueLabel.Text = $"{valueName}起点";
+                EventEndValueLabel.Text = $"{valueName}终点";
+                EventTrackBox.Text = item.Kind.DisplayName();
+                EventStartBeatBox.Text = item.StartBeat.ToString();
+                EventEndBeatBox.Text = item.EndBeat.ToString();
+                EventStartValueBox.Value = item.StartValue;
+                EventEndValueBox.Value = item.EndValue;
+                EventEasingBox.SelectedIndex = Math.Clamp(Math.Max(1, item.Easing) - 1, 0,
+                    PhiEdit.Core.Easing.Easing.Count - 1);
+                EventEasingLeftBox.Value = item.EasingLeft;
+                EventEasingRightBox.Value = item.EasingRight;
+                EventHookedCheck.IsChecked = item.IsHooked;
+                EventLinkGroupBox.Value = item.LinkedGroup;
+                UpdateEventCurvePreview(item);
+            }
+            else
+            {
+                EventInspectorTitle.Text = "事件属性";
+                EventStartValueLabel.Text = "起点值";
+                EventEndValueLabel.Text = "终点值";
+                EventTrackBox.Text = string.Empty;
+                EventStartBeatBox.Text = string.Empty;
+                EventEndBeatBox.Text = string.Empty;
+                EventEasingLeftBox.Value = 0;
+                EventEasingRightBox.Value = 1;
+                EventHookedCheck.IsChecked = false;
+                EventCurvePreview.Points = new PointCollection();
+            }
         }
-        else
+        finally
         {
-            NoteStartBeatBox.Text = string.Empty;
-            NoteEndBeatBox.Text = string.Empty;
+            _refreshingInspector = false;
+        }
+    }
+
+    /// <summary>按选中事件的缓动参数更新属性页内的橙色曲线预览。</summary>
+    private void UpdateEventCurvePreview(LineEvent item)
+    {
+        var points = new PointCollection();
+        for (var index = 0; index <= 100; index++)
+        {
+            var progress = index / 100.0;
+            var eased = PhiEdit.Core.Easing.Easing.Evaluate(progress, item.Easing, item.EasingLeft, item.EasingRight);
+            points.Add(new Point(10 + progress * 240, 80 - eased * 60));
         }
 
-        var item = _session.SelectedEvents.FirstOrDefault();
-        if (item is not null)
-        {
-            EventTrackBox.Text = item.Kind.DisplayName();
-            EventStartBeatBox.Text = item.StartBeat.ToString();
-            EventEndBeatBox.Text = item.EndBeat.ToString();
-            EventStartValueBox.Value = item.StartValue;
-            EventEndValueBox.Value = item.EndValue;
-            EventEasingBox.SelectedIndex = Math.Clamp(item.Easing - 1, 0, PhiEdit.Core.Easing.Easing.Count - 1);
-            EventLinkGroupBox.Value = item.LinkedGroup;
-        }
-        else
-        {
-            EventTrackBox.Text = string.Empty;
-            EventStartBeatBox.Text = string.Empty;
-            EventEndBeatBox.Text = string.Empty;
-        }
+        EventCurvePreview.Points = points;
+        var leftX = 10 + Math.Clamp(item.EasingLeft, 0, 1) * 240;
+        var rightX = 10 + Math.Clamp(item.EasingRight, 0, 1) * 240;
+        EventCurveLeftBound.X1 = EventCurveLeftBound.X2 = (float)leftX;
+        EventCurveRightBound.X1 = EventCurveRightBound.X2 = (float)rightX;
     }
 
     private void OnSessionChanged(object? sender, EventArgs e)
@@ -1008,6 +1065,11 @@ public sealed partial class MainWindow : Window
 
     private void OnNotePositionXChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
     {
+        if (_refreshingInspector)
+        {
+            return;
+        }
+
         var note = _session.SelectedNotes.FirstOrDefault();
         if (note is null || double.IsNaN(e.NewValue))
         {
@@ -1021,6 +1083,11 @@ public sealed partial class MainWindow : Window
 
     private void OnNotePositionYChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
     {
+        if (_refreshingInspector)
+        {
+            return;
+        }
+
         var note = _session.SelectedNotes.FirstOrDefault();
         if (note is null || double.IsNaN(e.NewValue))
         {
@@ -1104,6 +1171,11 @@ public sealed partial class MainWindow : Window
     /// <summary>编辑事件的缓动类型。</summary>
     private void OnEventEasingChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_refreshingInspector)
+        {
+            return;
+        }
+
         var item = _session.SelectedEvents.FirstOrDefault();
         if (item is null || EventEasingBox.SelectedIndex < 0)
         {
@@ -1118,6 +1190,11 @@ public sealed partial class MainWindow : Window
     /// <summary>编辑事件的绑定组。</summary>
     private void OnEventLinkGroupChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
     {
+        if (_refreshingInspector)
+        {
+            return;
+        }
+
         var item = _session.SelectedEvents.FirstOrDefault();
         if (item is null || double.IsNaN(e.NewValue))
         {
@@ -1131,6 +1208,11 @@ public sealed partial class MainWindow : Window
 
     private void OnEventValueChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
     {
+        if (_refreshingInspector)
+        {
+            return;
+        }
+
         var item = _session.SelectedEvents.FirstOrDefault();
         if (item is null)
         {
@@ -1149,6 +1231,198 @@ public sealed partial class MainWindow : Window
 
         _session.Document.IsDirty = true;
         EventSurface.Invalidate();
+    }
+
+    /// <summary>编辑缓动左右边界。</summary>
+    private void OnEventEasingBoundChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
+    {
+        if (_refreshingInspector || double.IsNaN(e.NewValue))
+        {
+            return;
+        }
+
+        var item = _session.SelectedEvents.FirstOrDefault();
+        if (item is null)
+        {
+            return;
+        }
+
+        var value = Math.Clamp(e.NewValue, 0, 1);
+        var isLeft = ReferenceEquals(sender, EventEasingLeftBox);
+        CommitEventChange(isLeft ? "修改缓动左边界" : "修改缓动右边界", item,
+            target =>
+            {
+                if (isLeft)
+                {
+                    target.EasingLeft = value;
+                }
+                else
+                {
+                    target.EasingRight = value;
+                }
+            });
+    }
+
+    /// <summary>钩定：首值始终等于同类上一条事件的尾值。</summary>
+    private void OnEventHookedChanged(object sender, RoutedEventArgs e)
+    {
+        if (_refreshingInspector)
+        {
+            return;
+        }
+
+        var item = _session.SelectedEvents.FirstOrDefault();
+        if (item is null)
+        {
+            return;
+        }
+
+        var hooked = EventHookedCheck.IsChecked == true;
+        CommitEventChange(hooked ? "钩定事件" : "取消钩定", item, target => target.IsHooked = hooked);
+    }
+
+    /// <summary>粘合：首值接到同类上一条事件的尾值。</summary>
+    private void OnEventStickClick(object sender, RoutedEventArgs e)
+    {
+        var item = _session.SelectedEvents.FirstOrDefault();
+        if (item is null)
+        {
+            return;
+        }
+
+        var previous = _session.CurrentLine?
+            .Track(item.Kind, item.Layer)
+            .Where(candidate => candidate != item && candidate.EndBeat.Value <= item.StartBeat.Value + 1e-9)
+            .OrderByDescending(candidate => candidate.EndBeat.Value)
+            .FirstOrDefault();
+
+        if (previous is null)
+        {
+            StatusReadout.Text = "当前轨道没有可粘合的前一事件";
+            return;
+        }
+
+        CommitEventChange("粘合前一事件", item, target =>
+        {
+            target.StartValue = previous.EndValue;
+            if (target.IsHooked)
+            {
+                target.EndValue = previous.EndValue;
+            }
+        });
+    }
+
+    /// <summary>切割：按横线细分密度采样为线性小段。</summary>
+    private void OnEventCutClick(object sender, RoutedEventArgs e)
+    {
+        var item = _session.SelectedEvents.FirstOrDefault();
+        if (item is null)
+        {
+            return;
+        }
+
+        var count = _editor.CutEvent(item, Math.Max(2, _session.Division * 4));
+        _session.SelectedEvents.Clear();
+        StatusReadout.Text = count > 0 ? $"已切割为 {count} 段" : "零长度事件不能切割";
+        RefreshAll();
+    }
+
+    /// <summary>随机缓动类型（与原版属性页的随机按钮对应）。</summary>
+    private void OnEventRandomClick(object sender, RoutedEventArgs e)
+    {
+        var item = _session.SelectedEvents.FirstOrDefault();
+        if (item is null)
+        {
+            return;
+        }
+
+        var next = 1 + Random.Shared.Next(PhiEdit.Core.Easing.Easing.Count);
+        if (next == item.Easing)
+        {
+            next = next % PhiEdit.Core.Easing.Easing.Count + 1;
+        }
+
+        CommitEventChange("随机缓动", item, target => target.Easing = next);
+    }
+
+    /// <summary>递推：把当前事件的尾值接到同类下一条事件的首值。</summary>
+    private void OnEventRecurrenceClick(object sender, RoutedEventArgs e)
+    {
+        var item = _session.SelectedEvents.FirstOrDefault();
+        if (item is null)
+        {
+            return;
+        }
+
+        var next = _session.CurrentLine?
+            .Track(item.Kind, item.Layer)
+            .Where(candidate => candidate != item && candidate.StartBeat.Value >= item.EndBeat.Value - 1e-9)
+            .OrderBy(candidate => candidate.StartBeat.Value)
+            .FirstOrDefault();
+
+        if (next is null)
+        {
+            StatusReadout.Text = "当前轨道没有可递推的后一事件";
+            return;
+        }
+
+        CommitEventChange("向后递推事件", next, target =>
+        {
+            target.StartValue = item.EndValue;
+            if (target.IsHooked)
+            {
+                target.EndValue = item.EndValue;
+            }
+        });
+    }
+
+    /// <summary>拆分：在当前判定线所在拍把事件切成两段。</summary>
+    private void OnEventSplitClick(object sender, RoutedEventArgs e)
+    {
+        var item = _session.SelectedEvents.FirstOrDefault();
+        if (item is null)
+        {
+            return;
+        }
+
+        var split = _editor.SplitEvent(item, Beat.FromValue(_session.Viewport.Position));
+        if (!split)
+        {
+            StatusReadout.Text = "拆分拍必须位于事件内部";
+            return;
+        }
+
+        _session.SelectedEvents.Clear();
+        StatusReadout.Text = "已拆分事件";
+        RefreshAll();
+    }
+
+    /// <summary>把一次属性修改包装成可撤销操作。</summary>
+    private void CommitEventChange(string label, LineEvent item, Action<LineEvent> mutate)
+    {
+        var before = item.Clone();
+        _session.Undo.Push(new DelegateAction(label, () => mutate(item), () => RestoreEvent(item, before)));
+        _session.Document.IsDirty = true;
+        EventSurface.Invalidate();
+        RefreshInspector();
+        StatusReadout.Text = label;
+    }
+
+    private static void RestoreEvent(LineEvent target, LineEvent before)
+    {
+        target.Kind = before.Kind;
+        target.Layer = before.Layer;
+        target.StartBeat = before.StartBeat;
+        target.EndBeat = before.EndBeat;
+        target.StartValue = before.StartValue;
+        target.EndValue = before.EndValue;
+        target.Easing = before.Easing;
+        target.EasingLeft = before.EasingLeft;
+        target.EasingRight = before.EasingRight;
+        target.LinkedGroup = before.LinkedGroup;
+        target.IsHooked = before.IsHooked;
+        target.Text = before.Text;
+        target.Color = before.Color;
     }
 
     private void OnBpmChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)

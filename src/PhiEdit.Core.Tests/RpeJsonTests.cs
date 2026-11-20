@@ -33,6 +33,10 @@ public class RpeJsonTests
             EndBeat = Beat.FromValue(3),
             StartValue = 15,
             EndValue = 45,
+            Easing = 6,
+            EasingLeft = 0.2,
+            EasingRight = 0.8,
+            IsHooked = true,
         });
 
         var json = RpeJson.Write(chart);
@@ -53,6 +57,10 @@ public class RpeJsonTests
         Assert.Single(rotate);
         Assert.Equal(15, rotate[0].StartValue, 6);
         Assert.Equal(45, rotate[0].EndValue, 6);
+        Assert.Equal(6, rotate[0].Easing);
+        Assert.Equal(0.2, rotate[0].EasingLeft, 6);
+        Assert.Equal(0.8, rotate[0].EasingRight, 6);
+        Assert.True(rotate[0].IsHooked);
     }
 
     [Fact]

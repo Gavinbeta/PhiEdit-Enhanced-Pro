@@ -179,6 +179,8 @@ public static class RpeJson
                     ["linkgroup"] = item.LinkedGroup,
                     ["curveType"] = 0,
                     ["easing"] = item.Easing,
+                    ["easingLeft"] = item.EasingLeft,
+                    ["easingRight"] = item.EasingRight,
                     ["inst"] = item.IsHooked ? 1 : 0,
                 };
 
@@ -220,6 +222,8 @@ public static class RpeJson
                             ["linkgroup"] = item.LinkedGroup,
                             ["curveType"] = 0,
                             ["easing"] = item.Easing,
+                            ["easingLeft"] = item.EasingLeft,
+                            ["easingRight"] = item.EasingRight,
                         });
                     }
 
@@ -336,6 +340,8 @@ public static class RpeJson
             EndValue = GetDouble(element, "end"),
             LinkedGroup = (int)GetDouble(element, "linkgroup"),
             Easing = (int)GetDouble(element, "easing"),
+            EasingLeft = GetDouble(element, "easingLeft"),
+            EasingRight = GetDouble(element, "easingRight", 1),
             IsHooked = GetDouble(element, "inst") == 1,
             Text = GetString(element, "text"),
             Color = GetString(element, "color"),

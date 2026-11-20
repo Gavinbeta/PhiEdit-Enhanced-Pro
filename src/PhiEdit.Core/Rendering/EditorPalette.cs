@@ -19,13 +19,28 @@ public sealed class EditorPalette
     public Color BeatLine { get; set; } = Color.FromArgb(255, 255, 59, 48);
 
     /// <summary>整拍线宽度（像素）。</summary>
-    public float BeatLineWidth { get; set; } = 3f;
+    public float BeatLineWidth { get; set; } = 5f;
+
+    /// <summary>网格距编辑区左右边界的留白（像素）。</summary>
+    public double GridInsetX { get; set; } = 28;
+
+    /// <summary>网格距编辑区顶部的留白（像素）。</summary>
+    public double GridInsetTop { get; set; } = 16;
+
+    /// <summary>网格与判定线之间的留白（像素）。</summary>
+    public double GridInsetBottom { get; set; } = 16;
 
     /// <summary>细分线颜色（绿）。</summary>
     public Color Subdivision { get; set; } = Color.FromArgb(255, 74, 168, 78);
 
     /// <summary>次级细分线颜色（绿，更淡）。</summary>
     public Color MinorSubdivision { get; set; } = Color.FromArgb(255, 74, 168, 78);
+
+    /// <summary>细分线宽度（像素）。</summary>
+    public float SubdivisionWidth { get; set; } = 2.5f;
+
+    /// <summary>次级细分线宽度（像素）。</summary>
+    public float MinorSubdivisionWidth { get; set; } = 1.5f;
 
     /// <summary>细分线不透明度。</summary>
     public byte SubdivisionAlpha { get; set; } = 150;
@@ -76,6 +91,9 @@ public sealed class EditorPalette
 
     /// <summary>选中时覆盖在物体上的半透明绿色。</summary>
     public Color SelectionFill { get; set; } = Color.FromArgb(255, 0, 230, 60);
+
+    /// <summary>事件条内缓动曲线颜色（原版为橙色细线）。</summary>
+    public Color EventCurve { get; set; } = Color.FromArgb(255, 255, 224, 163);
 
     public Color EventFill { get; set; } = Color.FromArgb(255, 229, 141, 36);
 

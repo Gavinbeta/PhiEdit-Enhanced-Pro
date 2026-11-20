@@ -1,5 +1,6 @@
 using PhiEdit.Core.Beats;
 using PhiEdit.Core.Charts;
+using PhiEdit.Core.Easing;
 
 namespace PhiEdit.Core.Editing;
 
@@ -372,6 +373,9 @@ public sealed class ChartEditor
             EndBeat = endBeat ?? startBeat,
             StartValue = startValue,
             EndValue = endValue ?? startValue,
+            Easing = 1,
+            EasingLeft = 0,
+            EasingRight = 1,
         };
 
         _session.Undo.Push(new DelegateAction(
@@ -381,6 +385,136 @@ public sealed class ChartEditor
 
         _session.Document.IsDirty = true;
         return item;
+    }
+
+    /// <summary>
+    /// 切割事件：按细分密度采样原缓动，生成若干线性小段（原版“切割”）。
+    /// </summary>
+    public int CutEvent(LineEvent item, int pieces)
+    {
+        if (item.DurationBeats <= 1e-9)
+        {
+            return 0;
+        }
+
+        var count = Math.Clamp(pieces, 2, 256);
+        var start = item.StartBeat.Value;
+        var duration = item.DurationBeats;
+        var parts = new List<LineEvent>(count);
+        for (var index = 0; index < count; index++)
+        {
+            var pieceStart = start + duration * index / count;
+            var pieceEnd = start + duration * (index + 1) / count;
+            parts.Add(CloneSegment(item, pieceStart, pieceEnd,
+                ValueAt(item, pieceStart), ValueAt(item, pieceEnd)));
+        }
+
+        return ReplaceWithParts(item, parts, "切割事件");
+    }
+
+    /// <summary>
+    /// 在指定拍把事件拆成两段，拆点数值由原缓动采样得到（原版“拆分”）。
+    /// </summary>
+    public bool SplitEvent(LineEvent item, Beat at)
+    {
+        if (item.DurationBeats <= 1e-9 || at.Value <= item.StartBeat.Value + 1e-9 ||
+            at.Value >= item.EndBeat.Value - 1e-9)
+        {
+            return false;
+        }
+
+        var value = ValueAt(item, at.Value);
+        var parts = new[]
+        {
+            CloneSegment(item, item.StartBeat.Value, at.Value, item.StartValue, value),
+            CloneSegment(item, at.Value, item.EndBeat.Value, value, item.EndValue),
+        };
+
+        return ReplaceWithParts(item, parts, "拆分事件") == parts.Length;
+    }
+
+    private static LineEvent CloneSegment(LineEvent source, double start, double end, double startValue, double endValue) =>
+        new()
+        {
+            Kind = source.Kind,
+            Layer = source.Layer,
+            StartBeat = Beat.FromValue(start),
+            EndBeat = Beat.FromValue(end),
+            StartValue = startValue,
+            EndValue = endValue,
+            Easing = 1,
+            EasingLeft = 0,
+            EasingRight = 1,
+            LinkedGroup = 0,
+            IsHooked = false,
+            Text = source.Text,
+            Color = source.Color,
+        };
+
+    private static double ValueAt(LineEvent item, double beat)
+    {
+        var duration = item.DurationBeats;
+        if (duration <= 1e-9)
+        {
+            return item.EndValue;
+        }
+
+        var progress = Math.Clamp((beat - item.StartBeat.Value) / duration, 0, 1);
+        var eased = PhiEdit.Core.Easing.Easing.Evaluate(progress, item.Easing, item.EasingLeft, item.EasingRight);
+        return item.StartValue + (item.EndValue - item.StartValue) * eased;
+    }
+
+    private int ReplaceWithParts(LineEvent original, IReadOnlyList<LineEvent> parts, string label)
+    {
+        var line = original.OwningLine;
+        if (line is null || parts.Count == 0)
+        {
+            return 0;
+        }
+
+        var list = EventListFor(original, line);
+        var index = Math.Max(0, list.IndexOf(original));
+        var before = list.ToList();
+        var partList = parts.ToList();
+
+        _session.Undo.Push(new DelegateAction(
+            label,
+            () =>
+            {
+                list.Remove(original);
+                for (var offset = 0; offset < partList.Count; offset++)
+                {
+                    list.Insert(index + offset, partList[offset]);
+                }
+            },
+            () =>
+            {
+                foreach (var part in partList)
+                {
+                    list.Remove(part);
+                }
+
+                list.Clear();
+                list.AddRange(before);
+            }));
+
+        _session.Document.IsDirty = true;
+        return partList.Count;
+    }
+
+    private static LineEventList EventListFor(LineEvent item, JudgeLine line)
+    {
+        if (item.Layer == 0)
+        {
+            return line.Events;
+        }
+
+        if (line.Layers.TryGetValue(item.Layer, out var tracks) && tracks.TryGetValue(item.Kind, out var list))
+        {
+            return list;
+        }
+
+        throw new InvalidOperationException("事件所在层不存在。");
     }
 
     /// <summary>删除事件。</summary>

@@ -30,6 +30,36 @@ public sealed class JudgeLine
 
     public double Speed { get; set; } = 1;
 
+    /// <summary>父判定线索引，-1 表示无父线。</summary>
+    public int Father { get; set; } = -1;
+
+    /// <summary>绘制层级，数值越大越靠上。</summary>
+    public int ZOrder { get; set; }
+
+    /// <summary>该线事件时间缩放；不改变音频播放速度。</summary>
+    public double BpmFactor { get; set; } = 1;
+
+    /// <summary>是否继承父线旋转；null 时按 RPE 版本决定。</summary>
+    public bool? RotateWithFather { get; set; } = true;
+
+    /// <summary>是否隐藏越过判定线的音符。</summary>
+    public int IsCover { get; set; } = 1;
+
+    /// <summary>判定线锚点，默认居中。</summary>
+    public double AnchorX { get; set; } = 0.5;
+
+    public double AnchorY { get; set; } = 0.5;
+
+    /// <summary>是否绑定到游戏 UI 而非直接绘制。</summary>
+    public bool AttachUI { get; set; }
+
+    /// <summary>控制曲线：透明度、横向位置、尺寸、斜切、纵向位置。</summary>
+    public List<ControlPoint> AlphaControl { get; } = new();
+    public List<ControlPoint> PosControl { get; } = new();
+    public List<ControlPoint> SizeControl { get; } = new();
+    public List<ControlPoint> SkewControl { get; } = new();
+    public List<ControlPoint> YControl { get; } = new();
+
     /// <summary>读入时保留的原始判定线节点，用于透传未知扩展字段。</summary>
     public JsonObject? RawNode { get; set; }
 

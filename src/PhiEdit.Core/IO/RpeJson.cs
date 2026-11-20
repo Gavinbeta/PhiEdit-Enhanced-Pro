@@ -148,14 +148,21 @@ public static class RpeJson
         node["Name"] = $"判定线 {line.Number}";
         node["Group"] = 0;
         node["Texture"] = string.IsNullOrEmpty(line.Texture) ? "line.png" : line.Texture;
-        node["bpmfactor"] = 1;
-        node["father"] = -1;
-        node["rotateWithFather"] = true;
-        node["isCover"] = 1;
-        node["zOrder"] = 0;
-        node["anchor"] = new JsonArray(0.5, 0.5);
+        node["bpmfactor"] = line.BpmFactor;
+        node["father"] = line.Father;
+        node["rotateWithFather"] = line.RotateWithFather ?? true;
+        node["isCover"] = line.IsCover;
+        node["zOrder"] = line.ZOrder;
+        node["anchor"] = new JsonArray(line.AnchorX, line.AnchorY);
         node["isGif"] = false;
         node["numOfNotes"] = line.Notes.Count;
+        node["attachUI"] = line.AttachUI;
+
+        WriteControl(node, "alphaControl", "alpha", line.AlphaControl);
+        WriteControl(node, "posControl", "pos", line.PosControl);
+        WriteControl(node, "sizeControl", "size", line.SizeControl);
+        WriteControl(node, "skewControl", "skew", line.SkewControl);
+        WriteControl(node, "yControl", "y", line.YControl);
 
         var noteArray = new JsonArray();
         foreach (var note in line.Notes)
@@ -172,6 +179,10 @@ public static class RpeJson
             noteNode["size"] = note.Size;
             noteNode["visibleTime"] = note.VisibleTime;
             noteNode["alpha"] = note.Alpha;
+            if (note.Color is { Length: 3 })
+            {
+                noteNode["color"] = new JsonArray(note.Color[0], note.Color[1], note.Color[2]);
+            }
             noteArray.Add(noteNode);
         }
 
@@ -207,9 +218,18 @@ public static class RpeJson
         node["eventLayers"] = layers;
 
         var extended = new JsonObject();
-        foreach (var item in line.Events.Where(item => EventTrackKinds.Extended.Contains(item.Kind)))
+        foreach (var item in line.Events.Where(item => EventTrackKinds.Extended.Contains(item.Kind) || item.Kind == EventTrackKind.Incline))
         {
             AddEvent(extended, item);
+        }
+
+        foreach (var layerIndex in line.Layers.Keys.Where(index => index > 0 && index != JudgeLine.SpecialLayer).Order())
+        {
+            foreach (var item in line.Layers[layerIndex].SelectMany(track => track.Value)
+                         .Where(item => item.Kind == EventTrackKind.Incline))
+            {
+                AddEvent(extended, item);
+            }
         }
 
         if (line.Layers.TryGetValue(JudgeLine.SpecialLayer, out var special))
@@ -225,6 +245,22 @@ public static class RpeJson
 
         node["extended"] = extended;
         return node;
+    }
+
+    private static void WriteControl(JsonObject node, string name, string valueKey, IReadOnlyList<ControlPoint> points)
+    {
+        var array = new JsonArray();
+        foreach (var point in points)
+        {
+            array.Add(new JsonObject
+            {
+                ["x"] = point.X,
+                [valueKey] = point.Y,
+                ["easing"] = point.Easing,
+            });
+        }
+
+        node[name] = array;
     }
 
     private static JsonObject CreateEmptyStandardLayer()
@@ -274,8 +310,12 @@ public static class RpeJson
         node["easingType"] = Math.Max(1, item.Easing);
         node["easingLeft"] = item.EasingLeft;
         node["easingRight"] = item.EasingRight;
-        node["bezier"] = 0;
-        node["bezierPoints"] = new JsonArray(0, 0, 1, 1);
+        node["bezier"] = item.Bezier ? 1 : 0;
+        node["bezierPoints"] = new JsonArray(
+            item.BezierPoints.ElementAtOrDefault(0),
+            item.BezierPoints.ElementAtOrDefault(1),
+            item.BezierPoints.ElementAtOrDefault(2),
+            item.BezierPoints.ElementAtOrDefault(3));
         node["linkgroup"] = item.LinkedGroup;
         // 扩展字段：参考程序会原样透传，本程序用它恢复“钩定”状态。
         node["inst"] = item.IsHooked ? 1 : 0;
@@ -320,12 +360,26 @@ public static class RpeJson
             Rotate = GetDouble(element, "rotate"),
             Alpha = GetDouble(element, "alpha", 255) / 255.0,
             Speed = GetDouble(element, "speed", 1),
+            Father = (int)GetDouble(element, "father", -1),
+            ZOrder = (int)GetDouble(element, "zOrder"),
+            BpmFactor = GetPositive(element, "bpmfactor", 1),
+            RotateWithFather = element.TryGetProperty("rotateWithFather", out _) ? GetBool(element, "rotateWithFather") : null,
+            IsCover = (int)GetDouble(element, "isCover", 1),
+            AnchorX = ReadAnchor(element, 0, 0.5),
+            AnchorY = ReadAnchor(element, 1, 0.5),
+            AttachUI = GetBool(element, "attachUI"),
             IsFake = GetBool(element, "isFake"),
             Texture = GetString(element, "Texture") ?? GetString(element, "texture"),
             Color = GetString(element, "color"),
             CustomBackground = GetString(element, "customBackground"),
             RawNode = JsonNode.Parse(element.GetRawText()) as JsonObject,
         };
+
+        ReadControl(line.AlphaControl, element, "alphaControl", "alpha");
+        ReadControl(line.PosControl, element, "posControl", "pos");
+        ReadControl(line.SizeControl, element, "sizeControl", "size");
+        ReadControl(line.SkewControl, element, "skewControl", "skew");
+        ReadControl(line.YControl, element, "yControl", "y");
 
         if (element.TryGetProperty("notes", out var notes) && notes.ValueKind == JsonValueKind.Array)
         {
@@ -349,6 +403,7 @@ public static class RpeJson
                     Size = GetDouble(noteElement, "size", 1),
                     VisibleTime = GetDouble(noteElement, "visibleTime", GetDouble(noteElement, "visualTime", 999999)),
                     Alpha = GetDouble(noteElement, "alpha", 255),
+                    Color = ReadRgb(noteElement, "color"),
                     RawNode = JsonNode.Parse(noteElement.GetRawText()) as JsonObject,
                 });
             }
@@ -456,6 +511,8 @@ public static class RpeJson
             Easing = (int)GetDouble(element, "easingType", GetDouble(element, "easing", 1)),
             EasingLeft = GetDouble(element, "easingLeft"),
             EasingRight = GetDouble(element, "easingRight", 1),
+            Bezier = GetBool(element, "bezier"),
+            BezierPoints = ReadBezier(element),
             IsHooked = GetDouble(element, "inst") == 1,
             Text = GetString(element, "text"),
             Color = color ?? GetString(element, "color"),
@@ -470,6 +527,61 @@ public static class RpeJson
             ShaderCode = GetString(element, "shaderCode"),
             RawNode = JsonNode.Parse(element.GetRawText()) as JsonObject,
         };
+    }
+
+    private static void ReadControl(List<ControlPoint> target, JsonElement element, string property, string valueKey)
+    {
+        target.Clear();
+        if (!element.TryGetProperty(property, out var array) || array.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        foreach (var point in array.EnumerateArray())
+        {
+            if (point.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var value = GetDouble(point, valueKey, GetDouble(point, "y", 1));
+            target.Add(new ControlPoint(GetDouble(point, "x"), value, (int)GetDouble(point, "easing", 1)));
+        }
+    }
+
+    private static double ReadAnchor(JsonElement element, int index, double fallback)
+    {
+        if (!element.TryGetProperty("anchor", out var anchor) || anchor.ValueKind != JsonValueKind.Array)
+        {
+            return fallback;
+        }
+
+        var values = anchor.EnumerateArray().ToArray();
+        return index < values.Length && values[index].ValueKind == JsonValueKind.Number
+            ? values[index].GetDouble()
+            : fallback;
+    }
+
+    private static double GetPositive(JsonElement element, string property, double fallback) =>
+        element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Number && value.GetDouble() > 0
+            ? value.GetDouble()
+            : fallback;
+
+    private static double[]? ReadRgb(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Array
+            ? value.EnumerateArray().Select(item => item.ValueKind == JsonValueKind.Number ? item.GetDouble() : 0).Take(3).ToArray()
+            : null;
+
+    private static double[] ReadBezier(JsonElement element)
+    {
+        if (!element.TryGetProperty("bezierPoints", out var points) || points.ValueKind != JsonValueKind.Array)
+        {
+            return new[] { 0.0, 0.0, 1.0, 1.0 };
+        }
+
+        var values = points.EnumerateArray().Take(4).Select(item =>
+            item.ValueKind == JsonValueKind.Number ? item.GetDouble() : 0).ToArray();
+        return values.Length == 4 ? values : new[] { 0.0, 0.0, 1.0, 1.0 };
     }
 
     private static string FormatRgb(JsonElement value)

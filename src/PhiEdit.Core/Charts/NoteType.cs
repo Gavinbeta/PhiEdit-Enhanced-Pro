@@ -22,6 +22,7 @@ public enum EventTrackKind
     Color,
     Paint,
     Text,
+    Incline,
 }
 
 /// <summary>轨道类别归类，便于界面分组显示。</summary>
@@ -59,6 +60,7 @@ public static class EventTrackKinds
         EventTrackKind.Color => "colorEvents",
         EventTrackKind.Paint => "paintEvents",
         EventTrackKind.Text => "textEvents",
+        EventTrackKind.Incline => "inclineEvents",
         _ => kind.ToString(),
     };
 
@@ -74,6 +76,7 @@ public static class EventTrackKinds
         "colorEvents" => EventTrackKind.Color,
         "paintEvents" => EventTrackKind.Paint,
         "textEvents" => EventTrackKind.Text,
+        "inclineEvents" => EventTrackKind.Incline,
         _ => null,
     };
 
@@ -89,6 +92,7 @@ public static class EventTrackKinds
         EventTrackKind.Color => "颜色",
         EventTrackKind.Paint => "着色器",
         EventTrackKind.Text => "文字",
+        EventTrackKind.Incline => "倾斜",
         _ => kind.ToString(),
     };
 

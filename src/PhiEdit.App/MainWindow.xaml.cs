@@ -35,6 +35,8 @@ public sealed partial class MainWindow : Window
 
     private readonly DispatcherQueueTimer _timer;
 
+    private PreviewWindow? _previewWindow;
+
     private string? _currentFilePath;
 
     private bool _refreshingInspector;
@@ -630,6 +632,7 @@ public sealed partial class MainWindow : Window
 
         RefreshTimeline();
         EditorCanvas.Invalidate();
+        _previewWindow?.SyncFromEditor(_session.Viewport.Position);
     }
 
 
@@ -859,6 +862,7 @@ public sealed partial class MainWindow : Window
         _session.Viewport.SetPosition(beat);
         Scrubber.Value = Math.Clamp(beat, Scrubber.Minimum, Scrubber.Maximum);
         RefreshTimeline();
+        _previewWindow?.SyncFromEditor(beat);
     }
 
     // ---------------------------------------------------------------- 工具栏
@@ -896,6 +900,19 @@ public sealed partial class MainWindow : Window
         _session.Viewport.ScrollToBeat(0);
         PlayGlyph.Glyph = "\uE768";
         RefreshTimeline();
+    }
+
+    /// <summary>打开独立实时预览窗口。预览内容始终来自整份谱面。</summary>
+    private void OnPreviewClick(object sender, RoutedEventArgs e)
+    {
+        if (_previewWindow is null)
+        {
+            _previewWindow = new PreviewWindow(_session);
+            _previewWindow.Closed += (_, _) => _previewWindow = null;
+        }
+
+        _previewWindow.SyncFromEditor(_session.Viewport.Position);
+        _previewWindow.Activate();
     }
 
     private void OnLineSelectionChanged(object sender, SelectionChangedEventArgs e)

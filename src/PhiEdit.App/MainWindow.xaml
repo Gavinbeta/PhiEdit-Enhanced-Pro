@@ -246,49 +246,91 @@
                                 <NumberBox x:Name="EventEndValueBox" SpinButtonPlacementMode="Hidden"
                                            ValueChanged="OnEventValueChanged" />
                             </StackPanel>
-                            <StackPanel x:Name="EventSpecialValuePanel" Spacing="6" Visibility="Collapsed">
-                                <TextBlock x:Name="EventSpecialValueLabel" Text="内容" Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox x:Name="EventSpecialValueBox" LostFocus="OnEventSpecialValueEdited" />
+                            <StackPanel x:Name="EventColorValuePanel" Spacing="6" Visibility="Collapsed">
+                                <TextBlock Text="起始颜色" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox x:Name="EventStartColorBox" LostFocus="OnEventColorEdited" />
+                                <TextBlock Text="结束颜色" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox x:Name="EventEndColorBox" LostFocus="OnEventColorEdited" />
                             </StackPanel>
-                            <StackPanel Spacing="6">
-                                <TextBlock Text="缓动类型" Style="{StaticResource FieldLabelStyle}" />
-                                <ComboBox x:Name="EventEasingBox" HorizontalAlignment="Stretch"
-                                          MaxDropDownHeight="360"
-                                          SelectionChanged="OnEventEasingChanged" />
+                            <StackPanel x:Name="EventTextValuePanel" Spacing="6" Visibility="Collapsed">
+                                <TextBlock Text="起始文字" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox x:Name="EventStartTextBox" LostFocus="OnEventTextEdited" />
+                                <TextBlock Text="结束文字" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox x:Name="EventEndTextBox" LostFocus="OnEventTextEdited" />
                             </StackPanel>
-                            <Grid ColumnDefinitions="*,*">
-                                <StackPanel Grid.Column="0" Spacing="6" Margin="0,0,6,0">
-                                    <TextBlock Text="缓动左边界" Style="{StaticResource FieldLabelStyle}" />
-                                    <NumberBox x:Name="EventEasingLeftBox" Minimum="0" Maximum="1" SmallChange="0.05"
-                                               SpinButtonPlacementMode="Hidden" ValueChanged="OnEventEasingBoundChanged" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="1" Spacing="6" Margin="6,0,0,0">
-                                    <TextBlock Text="缓动右边界" Style="{StaticResource FieldLabelStyle}" />
-                                    <NumberBox x:Name="EventEasingRightBox" Minimum="0" Maximum="1" SmallChange="0.05"
-                                               SpinButtonPlacementMode="Hidden" ValueChanged="OnEventEasingBoundChanged" />
-                                </StackPanel>
-                            </Grid>
+                            <StackPanel x:Name="EventShaderPanel" Spacing="6" Visibility="Collapsed">
+                                <TextBlock Text="类型" Style="{StaticResource FieldLabelStyle}" />
+                                <ComboBox x:Name="EventShaderTypeBox" HorizontalAlignment="Stretch"
+                                          SelectionChanged="OnEventShaderTypeChanged">
+                                    <ComboBoxItem Content="chromatic" />
+                                    <ComboBoxItem Content="blur" />
+                                    <ComboBoxItem Content="glitch" />
+                                    <ComboBoxItem Content="custom" />
+                                </ComboBox>
+                                <Button x:Name="EventShaderCodeButton" Content="Shader 代码编辑器..."
+                                        Click="OnEventShaderCodeClick" HorizontalAlignment="Stretch" />
+                                <CheckBox x:Name="EventShaderGlobalBox" Content="全局（包含游戏 UI）"
+                                          Checked="OnEventShaderFlagChanged" Unchecked="OnEventShaderFlagChanged" />
+                                <CheckBox x:Name="EventShaderAutoAlignBox" Content="移动时参数自动对齐"
+                                          Checked="OnEventShaderFlagChanged" Unchecked="OnEventShaderFlagChanged" />
+                                <TextBlock Text="顺序" Style="{StaticResource FieldLabelStyle}" />
+                                <NumberBox x:Name="EventShaderOrderBox" SpinButtonPlacementMode="Hidden"
+                                           ValueChanged="OnEventShaderNumberChanged" />
+                                <TextBlock Text="参数" Style="{StaticResource FieldLabelStyle}" />
+                                <ComboBox x:Name="EventShaderParameterBox" HorizontalAlignment="Stretch"
+                                          SelectionChanged="OnEventShaderParameterChanged">
+                                    <ComboBoxItem Content="sampleCount" />
+                                    <ComboBoxItem Content="intensity" />
+                                    <ComboBoxItem Content="speed" />
+                                </ComboBox>
+                                <Button Content="编辑参数" Click="OnEventShaderCodeClick" HorizontalAlignment="Stretch" />
+                            </StackPanel>
+
                             <StackPanel Spacing="6">
-                                <TextBlock Text="绑定组" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBlock Text="绑定组编号" Style="{StaticResource FieldLabelStyle}" />
                                 <NumberBox x:Name="EventLinkGroupBox" Minimum="0" SpinButtonPlacementMode="Hidden"
                                            ValueChanged="OnEventLinkGroupChanged" />
                             </StackPanel>
 
-                            <controls:EventCurveGraph x:Name="EventCurvePreview" Height="170"
-                                                      HorizontalAlignment="Stretch" />
+                            <CheckBox x:Name="EventHookedCheck" Content="钩定（首尾同步）"
+                                      Checked="OnEventHookedChanged" Unchecked="OnEventHookedChanged" />
 
-                            <Grid ColumnDefinitions="*,*,*" RowDefinitions="Auto,Auto" HorizontalAlignment="Stretch">
-                                <Button Grid.Row="0" Grid.Column="0" Content="粘合" Margin="0,0,4,4"
+                            <StackPanel x:Name="EventEasingSection" Spacing="10">
+                                <StackPanel Spacing="6">
+                                    <TextBlock Text="缓动类型" Style="{StaticResource FieldLabelStyle}" />
+                                    <ComboBox x:Name="EventEasingBox" HorizontalAlignment="Stretch"
+                                              MaxDropDownHeight="360"
+                                              SelectionChanged="OnEventEasingChanged" />
+                                </StackPanel>
+                                <Grid ColumnDefinitions="*,*">
+                                    <StackPanel Grid.Column="0" Spacing="6" Margin="0,0,6,0">
+                                        <TextBlock Text="缓动左边界" Style="{StaticResource FieldLabelStyle}" />
+                                        <NumberBox x:Name="EventEasingLeftBox" Minimum="0" Maximum="1" SmallChange="0.05"
+                                                   SpinButtonPlacementMode="Hidden" ValueChanged="OnEventEasingBoundChanged" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Spacing="6" Margin="6,0,0,0">
+                                        <TextBlock Text="缓动右边界" Style="{StaticResource FieldLabelStyle}" />
+                                        <NumberBox x:Name="EventEasingRightBox" Minimum="0" Maximum="1" SmallChange="0.05"
+                                                   SpinButtonPlacementMode="Hidden" ValueChanged="OnEventEasingBoundChanged" />
+                                    </StackPanel>
+                                </Grid>
+                                <controls:EventCurveGraph x:Name="EventCurvePreview" Height="170"
+                                                          HorizontalAlignment="Stretch" />
+                            </StackPanel>
+
+                            <Grid x:Name="EventActionGrid" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto"
+                                  HorizontalAlignment="Stretch">
+                                <Button Grid.Row="0" Grid.Column="0" Content="粘合前一事件" Margin="0,0,4,4"
                                         Click="OnEventStickClick" HorizontalAlignment="Stretch" />
-                                <Button Grid.Row="0" Grid.Column="1" Content="切割" Margin="4,0,4,4"
+                                <Button Grid.Row="0" Grid.Column="1" Content="切割事件" Margin="4,0,0,4"
                                         Click="OnEventCutClick" HorizontalAlignment="Stretch" />
-                                <Button Grid.Row="0" Grid.Column="2" Content="随机" Margin="4,0,0,4"
-                                        Click="OnEventRandomClick" HorizontalAlignment="Stretch" />
-                                <Button Grid.Row="1" Grid.Column="0" Content="递推" Margin="0,4,4,0"
+                                <Button Grid.Row="1" Grid.Column="0" Content="首尾交换" Margin="0,4,4,4"
+                                        Click="OnEventSwapClick" HorizontalAlignment="Stretch" />
+                                <Button Grid.Row="1" Grid.Column="1" Content="递推" Margin="4,4,0,4"
                                         Click="OnEventRecurrenceClick" HorizontalAlignment="Stretch" />
-                                <Button Grid.Row="1" Grid.Column="1" Content="拆分" Margin="4,4,4,0"
+                                <Button Grid.Row="2" Grid.Column="0" Content="拆分" Margin="0,4,4,0"
                                         Click="OnEventSplitClick" HorizontalAlignment="Stretch" />
-                                <Button Grid.Row="1" Grid.Column="2" Content="删除" Margin="4,4,0,0"
+                                <Button Grid.Row="2" Grid.Column="1" Content="删除事件" Margin="4,4,0,0"
                                         Click="OnDeleteEventClick" HorizontalAlignment="Stretch" />
                             </Grid>
                         </StackPanel>

@@ -60,13 +60,13 @@ public sealed class EditorCanvas : UserControl
     private double _marqueeCurrentY;
     private bool _marqueeAppend;
 
+    private enum PendingPlacement { None, Hold, Event }
+
     private Point _lastPointerPosition;
-    private bool _holdPending;
-    private double _holdStartBeat;
-    private double _holdStageX;
-    private bool _eventPending;
-    private double _eventStartBeat;
-    private int _eventChannel;
+    private PendingPlacement _pendingPlacement;
+    private double _pendingStartBeat;
+    private double _pendingStageX;
+    private int _pendingChannel;
 
     private readonly record struct NoteDragOrigin(Note Note, double Beat, double End, double X);
     private readonly record struct EventDragOrigin(LineEvent Event, double Start, double End, double StartValue, double EndValue);
@@ -867,7 +867,7 @@ public sealed class EditorCanvas : UserControl
 
         var point = e.GetCurrentPoint(_canvas);
         _lastPointerPosition = point.Position;
-        if (_holdPending || _eventPending)
+        if (_pendingPlacement != PendingPlacement.None)
         {
             Invalidate();
         }
@@ -1121,7 +1121,10 @@ public sealed class EditorCanvas : UserControl
         return $"已放置 {type}";
     }
 
-    /// <summary>R：音符区两段式放置 Hold，判定线区两段式放置事件条。</summary>
+    /// <summary>
+    /// R：第一次按下松开确定类型/轨道/起点；第二次只按纵向坐标确定终点，
+    /// 当前鼠标所在区域不再影响放置结果。
+    /// </summary>
     public string HandleRKey()
     {
         if (_session?.CurrentLine is null || _editor is null)
@@ -1133,115 +1136,130 @@ public sealed class EditorCanvas : UserControl
         var viewport = _session.Viewport;
         var beat = SnapBeat(viewport.BeatAtY(_lastPointerPosition.Y));
 
-        if (_lastPointerPosition.X <= layout.LeftWidth)
+        if (_pendingPlacement == PendingPlacement.None)
         {
-            if (!_holdPending)
+            if (_lastPointerPosition.X <= layout.LeftWidth)
             {
-                _holdPending = true;
-                _holdStartBeat = beat;
-                _holdStageX = SnapX(viewport.PixelToStageX(
+                _pendingPlacement = PendingPlacement.Hold;
+                _pendingStartBeat = beat;
+                _pendingStageX = SnapX(viewport.PixelToStageX(
                     ClampNotePixel(_lastPointerPosition.X, layout.LeftWidth) - Palette.GridInsetX));
                 Invalidate();
                 return "Hold 起点已设置，移动鼠标后再次按 R 确定终点";
             }
 
-            if (beat <= _holdStartBeat + 1e-9)
+            if (_lastPointerPosition.X < layout.RightLeft)
             {
-                return "Hold 终点必须晚于起点";
+                return "指针不在编辑区内";
             }
 
-            var note = _editor.PlaceNote(_session.CurrentLine, NoteType.Hold,
-                Beat.FromValue(_holdStartBeat), _holdStageX);
-            note.EndBeat = Beat.FromValue(beat);
-            _session.Document.IsDirty = true;
-            _holdPending = false;
-            _session.SelectedNotes.Clear();
-            _session.SelectedNotes.Add(note);
-            RaiseSelectionChanged();
-            return "已放置 Hold";
-        }
+            var channelWidth = ChannelWidth(layout.RightWidth);
+            var channel = (int)((_lastPointerPosition.X - layout.RightLeft - Palette.GridInsetX) / Math.Max(1, channelWidth));
+            if (channel < 0 || channel >= ActiveTracks.Count)
+            {
+                return "指针不在事件轨道内";
+            }
 
-        if (_lastPointerPosition.X < layout.RightLeft)
-        {
-            return "指针不在编辑区内";
-        }
-
-        var channelWidth = ChannelWidth(layout.RightWidth);
-        var gridLeft = layout.RightLeft + Palette.GridInsetX;
-        var channel = (int)((_lastPointerPosition.X - gridLeft) / Math.Max(1, channelWidth));
-        if (channel < 0 || channel >= ActiveTracks.Count)
-        {
-            return "指针不在事件轨道内";
-        }
-
-        if (!_eventPending)
-        {
-            _eventPending = true;
-            _eventStartBeat = beat;
-            _eventChannel = channel;
+            _pendingPlacement = PendingPlacement.Event;
+            _pendingStartBeat = beat;
+            _pendingChannel = channel;
             Invalidate();
             return "事件起点已设置，移动鼠标后再次按 R 确定终点";
         }
 
-        if (beat <= _eventStartBeat + 1e-9)
+        if (beat <= _pendingStartBeat + 1e-9)
         {
-            return "事件终点必须晚于起点";
+            Invalidate();
+            return _pendingPlacement == PendingPlacement.Hold
+                ? "Hold 终点必须晚于起点"
+                : "事件终点必须晚于起点";
         }
 
-        var kind = ActiveTracks[channel];
-        var value = CurrentValue(_session.CurrentLine, kind, _session.CurrentLayer, _eventStartBeat);
+        if (_pendingPlacement == PendingPlacement.Hold)
+        {
+            var note = _editor.PlaceNote(_session.CurrentLine, NoteType.Hold,
+                Beat.FromValue(_pendingStartBeat), _pendingStageX);
+            note.EndBeat = Beat.FromValue(beat);
+            _session.Document.IsDirty = true;
+            _session.SelectedNotes.Clear();
+            _session.SelectedNotes.Add(note);
+            _pendingPlacement = PendingPlacement.None;
+            RaiseSelectionChanged();
+            return "已放置 Hold";
+        }
+
+        var kind = ActiveTracks[Math.Clamp(_pendingChannel, 0, ActiveTracks.Count - 1)];
+        var value = CurrentValue(_session.CurrentLine, kind, _session.CurrentLayer, _pendingStartBeat);
         var item = _editor.AddEvent(_session.CurrentLine, kind, _session.CurrentLayer,
-            Beat.FromValue(_eventStartBeat), value, value, Beat.FromValue(beat));
-        _eventPending = false;
+            Beat.FromValue(_pendingStartBeat), value, value, Beat.FromValue(beat));
         _session.SelectedEvents.Clear();
         _session.SelectedEvents.Add(item);
+        _pendingPlacement = PendingPlacement.None;
         RaiseSelectionChanged();
         return $"已放置 {kind.DisplayName()}事件";
     }
 
     public void CancelPendingPlacement()
     {
-        _holdPending = false;
-        _eventPending = false;
+        _pendingPlacement = PendingPlacement.None;
         Invalidate();
     }
+
+    private double PendingEndBeat(EditViewport viewport) =>
+        SnapBeat(viewport.BeatAtY(_lastPointerPosition.Y));
+
+    private bool PendingIsValid(EditViewport viewport) =>
+        PendingEndBeat(viewport) > _pendingStartBeat + 1e-9;
 
     private void DrawPendingHold(CanvasDrawingSession drawing, EditorSession session, EditViewport viewport,
         double left, double width, double height)
     {
-        if (!_holdPending)
+        if (_pendingPlacement != PendingPlacement.Hold)
         {
             return;
         }
 
         var gridLeft = left + Palette.GridInsetX;
-        var x = (float)(gridLeft + viewport.StageXToPixel(_holdStageX));
-        var startY = viewport.YAtBeat(_holdStartBeat);
-        var endY = viewport.YAtBeat(SnapBeat(viewport.BeatAtY(_lastPointerPosition.Y)));
+        var x = (float)(gridLeft + viewport.StageXToPixel(_pendingStageX));
+        var startY = viewport.YAtBeat(_pendingStartBeat);
+        var endY = viewport.YAtBeat(PendingEndBeat(viewport));
         var top = (float)Math.Max(-10, Math.Min(startY, endY));
         var bottom = (float)Math.Min(height + 10, Math.Max(startY, endY));
-        var noteWidth = (float)BaseWidth(NoteScale(width), new Note { Size = 1 });
-        drawing.FillRoundedRectangle(new Rect(x - noteWidth / 2, top, noteWidth, Math.Max(2, bottom - top)),
-            4, 4, Windows.UI.Color.FromArgb(120, 60, 230, 90));
+        var rect = new Rect(x - NoteScale(width) / 2, top, NoteScale(width), Math.Max(2, bottom - top));
+        if (PendingIsValid(viewport))
+        {
+            drawing.FillRoundedRectangle(rect, 4, 4, Windows.UI.Color.FromArgb(120, 60, 230, 90));
+        }
+        else
+        {
+            drawing.DrawRectangle(rect, Windows.UI.Color.FromArgb(255, 255, 60, 60), 2f);
+        }
     }
 
     private void DrawPendingEvent(CanvasDrawingSession drawing, EditorSession session, EditViewport viewport,
         double left, double width, double height)
     {
-        if (!_eventPending || _eventChannel < 0 || _eventChannel >= ActiveTracks.Count)
+        if (_pendingPlacement != PendingPlacement.Event || _pendingChannel < 0 || _pendingChannel >= ActiveTracks.Count)
         {
             return;
         }
 
         var channelWidth = ChannelWidth(width);
         var barWidth = Math.Max(6, channelWidth * 0.62);
-        var barX = (float)(left + Palette.GridInsetX + _eventChannel * channelWidth + (channelWidth - barWidth) / 2);
-        var startY = viewport.YAtBeat(_eventStartBeat);
-        var endY = viewport.YAtBeat(SnapBeat(viewport.BeatAtY(_lastPointerPosition.Y)));
+        var barX = (float)(left + Palette.GridInsetX + _pendingChannel * channelWidth + (channelWidth - barWidth) / 2);
+        var startY = viewport.YAtBeat(_pendingStartBeat);
+        var endY = viewport.YAtBeat(PendingEndBeat(viewport));
         var top = (float)Math.Max(-10, Math.Min(startY, endY));
         var bottom = (float)Math.Min(height + 10, Math.Max(startY, endY));
-        drawing.FillRectangle(new Rect(barX, top, (float)barWidth, Math.Max(2, bottom - top)),
-            Windows.UI.Color.FromArgb(110, 255, 140, 24));
+        var rect = new Rect(barX, top, (float)barWidth, Math.Max(2, bottom - top));
+        if (PendingIsValid(viewport))
+        {
+            drawing.FillRectangle(rect, Windows.UI.Color.FromArgb(110, 255, 140, 24));
+        }
+        else
+        {
+            drawing.DrawRectangle(rect, Windows.UI.Color.FromArgb(255, 255, 60, 60), 2f);
+        }
     }
 
     private void PlaceNote(double x, double y)

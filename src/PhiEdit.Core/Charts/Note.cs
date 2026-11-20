@@ -92,6 +92,27 @@ public sealed class LineEvent
     /// <summary>事件附带的颜色（颜色轨道使用）。</summary>
     public string? Color { get; set; }
 
+    /// <summary>颜色事件的终点颜色。</summary>
+    public string? EndColor { get; set; }
+
+    /// <summary>文字事件的起止文字。</summary>
+    public string? StartText { get; set; }
+
+    public string? EndText { get; set; }
+
+    /// <summary>着色器事件字段。</summary>
+    public string? ShaderType { get; set; } = "chromatic";
+
+    public bool ShaderGlobal { get; set; }
+
+    public bool ShaderAutoAlign { get; set; } = true;
+
+    public int ShaderOrder { get; set; }
+
+    public string? ShaderParameter { get; set; } = "sampleCount";
+
+    public string? ShaderCode { get; set; }
+
     /// <summary>所属判定线（由判定线在加入集合时回填）。</summary>
     public JudgeLine? OwningLine { get; internal set; }
 

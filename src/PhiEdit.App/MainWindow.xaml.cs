@@ -88,6 +88,7 @@ public sealed partial class MainWindow : Window
 
         RegisterShortcuts();
         RootLayout.KeyDown += OnRootKeyDown;
+        RootLayout.KeyUp += OnRootKeyUp;
 
         // 滚轮统一在窗口根节点处理：无论焦点在哪个控件，只要指针位于编辑区就应滚动时间轴。
         RootLayout.PointerWheelChanged += OnRootPointerWheelChanged;
@@ -788,15 +789,41 @@ public sealed partial class MainWindow : Window
                     EventTrackKind.Text => "文本",
                     _ => "数值",
                 };
-                var stringEvent = item.Kind is EventTrackKind.Paint or EventTrackKind.Text;
+                var isColor = item.Kind == EventTrackKind.Color;
+                var isText = item.Kind == EventTrackKind.Text;
+                var isShader = item.Kind == EventTrackKind.Paint;
+                var specialValue = isColor || isText || isShader;
                 EventInspectorTitle.Text = $"{valueName}事件编辑";
                 EventStartValueLabel.Text = $"{valueName}起点";
                 EventEndValueLabel.Text = $"{valueName}终点";
-                EventStartValuePanel.Visibility = stringEvent ? Visibility.Collapsed : Visibility.Visible;
-                EventEndValuePanel.Visibility = stringEvent ? Visibility.Collapsed : Visibility.Visible;
-                EventSpecialValuePanel.Visibility = stringEvent ? Visibility.Visible : Visibility.Collapsed;
-                EventSpecialValueLabel.Text = item.Kind == EventTrackKind.Paint ? "着色器路径" : "文本内容";
-                EventSpecialValueBox.Text = item.Kind == EventTrackKind.Paint ? item.Color ?? string.Empty : item.Text ?? string.Empty;
+                EventStartValuePanel.Visibility = specialValue ? Visibility.Collapsed : Visibility.Visible;
+                EventEndValuePanel.Visibility = specialValue ? Visibility.Collapsed : Visibility.Visible;
+                EventColorValuePanel.Visibility = isColor ? Visibility.Visible : Visibility.Collapsed;
+                EventTextValuePanel.Visibility = isText ? Visibility.Visible : Visibility.Collapsed;
+                EventShaderPanel.Visibility = isShader ? Visibility.Visible : Visibility.Collapsed;
+                EventEasingSection.Visibility = isShader ? Visibility.Collapsed : Visibility.Visible;
+                EventActionGrid.Visibility = isShader ? Visibility.Collapsed : Visibility.Visible;
+                EventHookedCheck.Visibility = isShader ? Visibility.Collapsed : Visibility.Visible;
+                EventStartColorBox.Text = item.Color ?? "255, 255, 255";
+                EventEndColorBox.Text = item.EndColor ?? item.Color ?? "255, 255, 255";
+                EventStartTextBox.Text = item.StartText ?? string.Empty;
+                EventEndTextBox.Text = item.EndText ?? string.Empty;
+                EventShaderTypeBox.SelectedIndex = item.ShaderType switch
+                {
+                    "blur" => 1,
+                    "glitch" => 2,
+                    "custom" => 3,
+                    _ => 0,
+                };
+                EventShaderGlobalBox.IsChecked = item.ShaderGlobal;
+                EventShaderAutoAlignBox.IsChecked = item.ShaderAutoAlign;
+                EventShaderOrderBox.Value = item.ShaderOrder;
+                EventShaderParameterBox.SelectedIndex = item.ShaderParameter switch
+                {
+                    "intensity" => 1,
+                    "speed" => 2,
+                    _ => 0,
+                };
                 EventTrackBox.Text = item.Kind.DisplayName();
                 EventStartBeatBox.Text = item.StartBeat.ToString();
                 EventEndBeatBox.Text = item.EndBeat.ToString();
@@ -807,7 +834,8 @@ public sealed partial class MainWindow : Window
                 EventEasingLeftBox.Value = item.EasingLeft;
                 EventEasingRightBox.Value = item.EasingRight;
                 EventLinkGroupBox.Value = item.LinkedGroup;
-                EventCurvePreview.Event = item;
+                EventHookedCheck.IsChecked = item.IsHooked;
+                EventCurvePreview.Event = isShader ? null : item;
             }
             else
             {
@@ -816,7 +844,13 @@ public sealed partial class MainWindow : Window
                 EventEndValueLabel.Text = "终点值";
                 EventStartValuePanel.Visibility = Visibility.Visible;
                 EventEndValuePanel.Visibility = Visibility.Visible;
-                EventSpecialValuePanel.Visibility = Visibility.Collapsed;
+                EventColorValuePanel.Visibility = Visibility.Collapsed;
+                EventTextValuePanel.Visibility = Visibility.Collapsed;
+                EventShaderPanel.Visibility = Visibility.Collapsed;
+                EventEasingSection.Visibility = Visibility.Visible;
+                EventActionGrid.Visibility = Visibility.Visible;
+                EventHookedCheck.Visibility = Visibility.Visible;
+                EventHookedCheck.IsChecked = false;
                 EventTrackBox.Text = string.Empty;
                 EventStartBeatBox.Text = string.Empty;
                 EventEndBeatBox.Text = string.Empty;
@@ -1400,26 +1434,145 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>编辑事件的绑定组。</summary>
-    private void OnEventSpecialValueEdited(object sender, RoutedEventArgs e)
+    private void OnEventColorEdited(object sender, RoutedEventArgs e)
     {
         var item = _session.SelectedEvents.FirstOrDefault();
-        if (item is null || item.Kind is not (EventTrackKind.Paint or EventTrackKind.Text))
+        if (item is null || item.Kind != EventTrackKind.Color)
         {
             return;
         }
 
-        CommitEventChange("修改事件内容", item, target =>
+        CommitEventChange("修改颜色", item, target =>
         {
-            if (target.Kind == EventTrackKind.Paint)
-            {
-                target.Color = EventSpecialValueBox.Text;
-            }
-            else
-            {
-                target.Text = EventSpecialValueBox.Text;
-            }
+            target.Color = EventStartColorBox.Text;
+            target.EndColor = EventEndColorBox.Text;
         });
     }
+
+    private void OnEventTextEdited(object sender, RoutedEventArgs e)
+    {
+        var item = _session.SelectedEvents.FirstOrDefault();
+        if (item is null || item.Kind != EventTrackKind.Text)
+        {
+            return;
+        }
+
+        CommitEventChange("修改文字", item, target =>
+        {
+            target.StartText = EventStartTextBox.Text;
+            target.EndText = EventEndTextBox.Text;
+        });
+    }
+
+    private void OnEventHookedChanged(object sender, RoutedEventArgs e)
+    {
+        if (_refreshingInspector)
+        {
+            return;
+        }
+
+        var item = _session.SelectedEvents.FirstOrDefault();
+        if (item is null)
+        {
+            return;
+        }
+
+        var hooked = EventHookedCheck.IsChecked == true;
+        CommitEventChange(hooked ? "钩定事件" : "取消钩定", item, target => target.IsHooked = hooked);
+    }
+
+    private void OnEventSwapClick(object sender, RoutedEventArgs e)
+    {
+        var item = _session.SelectedEvents.FirstOrDefault();
+        if (item is null)
+        {
+            return;
+        }
+
+        CommitEventChange("首尾交换", item, target =>
+        {
+            (target.StartBeat, target.EndBeat) = (target.EndBeat, target.StartBeat);
+            (target.StartValue, target.EndValue) = (target.EndValue, target.StartValue);
+            (target.StartText, target.EndText) = (target.EndText, target.StartText);
+            (target.Color, target.EndColor) = (target.EndColor, target.Color);
+        });
+    }
+
+    private void OnEventShaderTypeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_refreshingInspector)
+        {
+            return;
+        }
+
+        var item = _session.SelectedEvents.FirstOrDefault();
+        if (item is null || item.Kind != EventTrackKind.Paint || EventShaderTypeBox.SelectedIndex < 0)
+        {
+            return;
+        }
+
+        var value = EventShaderTypeBox.SelectedIndex switch { 1 => "blur", 2 => "glitch", 3 => "custom", _ => "chromatic" };
+        CommitEventChange("修改着色器类型", item, target => target.ShaderType = value);
+    }
+
+    private void OnEventShaderParameterChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_refreshingInspector)
+        {
+            return;
+        }
+
+        var item = _session.SelectedEvents.FirstOrDefault();
+        if (item is null || item.Kind != EventTrackKind.Paint || EventShaderParameterBox.SelectedIndex < 0)
+        {
+            return;
+        }
+
+        var value = EventShaderParameterBox.SelectedIndex switch { 1 => "intensity", 2 => "speed", _ => "sampleCount" };
+        CommitEventChange("修改着色器参数", item, target => target.ShaderParameter = value);
+    }
+
+    private void OnEventShaderFlagChanged(object sender, RoutedEventArgs e)
+    {
+        if (_refreshingInspector)
+        {
+            return;
+        }
+
+        var item = _session.SelectedEvents.FirstOrDefault();
+        if (item is null || item.Kind != EventTrackKind.Paint)
+        {
+            return;
+        }
+
+        var global = EventShaderGlobalBox.IsChecked == true;
+        var autoAlign = EventShaderAutoAlignBox.IsChecked == true;
+        CommitEventChange("修改着色器选项", item, target =>
+        {
+            target.ShaderGlobal = global;
+            target.ShaderAutoAlign = autoAlign;
+        });
+    }
+
+    private void OnEventShaderNumberChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
+    {
+        if (_refreshingInspector || double.IsNaN(e.NewValue))
+        {
+            return;
+        }
+
+        var item = _session.SelectedEvents.FirstOrDefault();
+        if (item is null || item.Kind != EventTrackKind.Paint)
+        {
+            return;
+        }
+
+        var order = (int)e.NewValue;
+        CommitEventChange("修改着色器顺序", item, target => target.ShaderOrder = order);
+    }
+
+    private void OnEventShaderCodeClick(object sender, RoutedEventArgs e) =>
+        StatusReadout.Text = "着色器代码编辑器暂未接入，字段已保存在谱面中";
 
     private void OnEventLinkGroupChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
     {
@@ -1638,6 +1791,15 @@ public sealed partial class MainWindow : Window
         target.IsHooked = before.IsHooked;
         target.Text = before.Text;
         target.Color = before.Color;
+        target.EndColor = before.EndColor;
+        target.StartText = before.StartText;
+        target.EndText = before.EndText;
+        target.ShaderType = before.ShaderType;
+        target.ShaderGlobal = before.ShaderGlobal;
+        target.ShaderAutoAlign = before.ShaderAutoAlign;
+        target.ShaderOrder = before.ShaderOrder;
+        target.ShaderParameter = before.ShaderParameter;
+        target.ShaderCode = before.ShaderCode;
     }
 
     private void OnBpmChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
@@ -1696,6 +1858,19 @@ public sealed partial class MainWindow : Window
                 DeleteSelection();
                 e.Handled = true;
                 break;
+        }
+    }
+
+    /// <summary>物件放置只在按键松开时触发，避免按住键重复放置。</summary>
+    private void OnRootKeyUp(object sender, KeyRoutedEventArgs e)
+    {
+        if (IsTextInputFocused())
+        {
+            return;
+        }
+
+        switch (e.Key)
+        {
             case VirtualKey.Q:
                 StatusReadout.Text = EditorCanvas.PlaceNoteAtPointer(NoteType.Tap);
                 e.Handled = true;

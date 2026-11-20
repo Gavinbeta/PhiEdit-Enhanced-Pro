@@ -26,6 +26,43 @@ public class PreviewRuntimeTests
     }
 
     [Fact]
+    public void LineAlpha_ComesFromAlphaEvents_NotBaseAlpha()
+    {
+        var chart = new ChartDocument();
+        var line = chart.AddLine();
+        line.Alpha = 1;
+        line.AddEvent(new LineEvent
+        {
+            Kind = EventTrackKind.Alpha,
+            StartBeat = Beat.Zero,
+            EndBeat = Beat.FromValue(100),
+            StartValue = 0,
+            EndValue = 0,
+        });
+        var runtime = new LineRuntime(line, chart.BuildTempoMap());
+
+        Assert.Equal(0, runtime.State(1).Alpha, 6);
+    }
+
+    [Fact]
+    public void LineAlpha_KeepsLegacyNormalizedEventsReadable()
+    {
+        var chart = new ChartDocument();
+        var line = chart.AddLine();
+        line.AddEvent(new LineEvent
+        {
+            Kind = EventTrackKind.Alpha,
+            StartBeat = Beat.Zero,
+            EndBeat = Beat.FromValue(100),
+            StartValue = 1,
+            EndValue = 1,
+        });
+        var runtime = new LineRuntime(line, chart.BuildTempoMap());
+
+        Assert.Equal(255, runtime.State(1).Alpha, 6);
+    }
+
+    [Fact]
     public void SpeedIntegral_AppliesReferenceUnitScale()
     {
         var chart = new ChartDocument();

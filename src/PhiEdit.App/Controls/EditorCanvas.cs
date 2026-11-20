@@ -373,7 +373,7 @@ public sealed class EditorCanvas : UserControl
             }
         }
 
-        return value ?? (kind is EventTrackKind.Alpha or EventTrackKind.Speed ? 1 : 0);
+        return value ?? (kind == EventTrackKind.Alpha ? 255 : kind == EventTrackKind.Speed ? 1 : 0);
     }
 
     private void DrawPlayhead(CanvasDrawingSession drawing, double left, double width, double playheadY)

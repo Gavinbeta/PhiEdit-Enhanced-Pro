@@ -122,6 +122,7 @@ public sealed partial class PreviewWindow : Window
     private void OnClosed(object sender, WindowEventArgs args)
     {
         _timer.Stop();
+        PreviewSurface.ReleaseResources();
         PreviewSurface.Session = null;
         PreviewSurface.Clock = null;
     }

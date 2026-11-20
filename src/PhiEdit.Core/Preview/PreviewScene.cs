@@ -64,6 +64,7 @@ public sealed class LineRuntime
     private readonly List<NoteEntry> _notes;
     private readonly double _minSpeed;
     private readonly bool _hasYControl;
+    private readonly bool _hasAlphaEvents;
 
     public LineRuntime(JudgeLine line, TempoMap tempo)
     {
@@ -75,6 +76,7 @@ public sealed class LineRuntime
         _yTracks = StandardTracks(EventTrackKind.Y, 0);
         _rotateTracks = StandardTracks(EventTrackKind.Rotate, 0);
         _alphaTracks = StandardTracks(EventTrackKind.Alpha, 0);
+        _hasAlphaEvents = _alphaTracks.Any(track => track.HasEvents);
         _speeds = Layers().Select(layer => new SpeedIntegral(EventsOf(layer, EventTrackKind.Speed), tempo, _factor)).ToList();
         if (_speeds.Count == 0)
         {
@@ -114,7 +116,11 @@ public sealed class LineRuntime
 
     public LineState State(double seconds)
     {
-        var alpha = NormalizeAlpha(_line.Alpha * 255 + _alphaTracks.Sum(track => track.Number(seconds)));
+        // 参考 scene.mjs：判定线 alpha 只由 alphaEvents 求和得到；
+        // 没有事件时才沿用判定线的基础 alpha，兼容本程序早期写出的谱面。
+        var alpha = _hasAlphaEvents
+            ? _alphaTracks.Sum(track => track.Number(seconds) * (track.IsLegacyAlpha ? 255 : 1))
+            : _line.Alpha * 255;
         var colorValue = _color.Value(seconds);
         var color = colorValue as double[] ?? (EventTrack.ToDouble(colorValue) is var gray && gray != 0
             ? new[] { gray, gray, gray }
@@ -226,7 +232,6 @@ public sealed class LineRuntime
         EventsOf(0, kind).Concat(_line.Layers.Values.SelectMany(tracks =>
             tracks.TryGetValue(kind, out var list) ? list : Enumerable.Empty<LineEvent>()));
 
-    private static double NormalizeAlpha(double value) => Math.Abs(value) <= 1.001 && value >= 0 ? value * 255 : value;
 }
 
 /// <summary>

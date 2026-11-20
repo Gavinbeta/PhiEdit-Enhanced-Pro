@@ -158,7 +158,7 @@ public sealed partial class MainWindow : Window
         editor.AddEvent(line, EventTrackKind.X, 0, Beat.FromValue(4.5), -120, 60, Beat.FromValue(5.5));
         editor.AddEvent(line, EventTrackKind.Y, 0, Beat.FromValue(4.5), 0, 40, Beat.FromValue(5.5));
         editor.AddEvent(line, EventTrackKind.Rotate, 0, Beat.FromValue(4.5), 0, 0, Beat.FromValue(5.5));
-        editor.AddEvent(line, EventTrackKind.Alpha, 0, Beat.FromValue(4.5), 1, 1, Beat.FromValue(5.5));
+        editor.AddEvent(line, EventTrackKind.Alpha, 0, Beat.FromValue(4.5), 255, 255, Beat.FromValue(5.5));
         editor.AddEvent(line, EventTrackKind.Speed, 0, Beat.FromValue(4.5), 1, 1, Beat.FromValue(5.5));
 
         _session.Undo.Clear();

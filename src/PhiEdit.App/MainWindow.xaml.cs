@@ -39,6 +39,8 @@ public sealed partial class MainWindow : Window
 
     private bool _refreshingInspector;
 
+    private Note? _noteEditSnapshot;
+
     // 单一画布：这些别名让既有调用保持兼容，实际都指向同一块 EditorCanvas。
     private EditorCanvas NoteSurface => EditorCanvas;
     private EditorCanvas EventSurface => EditorCanvas;
@@ -93,6 +95,8 @@ public sealed partial class MainWindow : Window
         {
             EventEasingBox.Items.Add($"{index + 1} · {PhiEdit.Core.Easing.Easing.DisplayName(index + 1)}");
         }
+
+        EventEasingBox.PointerWheelChanged += OnEventEasingWheel;
 
         DivisionBox.Value = _session.Division;
         GridCountBox.Value = _session.GridCount;
@@ -720,6 +724,13 @@ public sealed partial class MainWindow : Window
             var note = _session.SelectedNotes.FirstOrDefault();
             if (note is not null)
             {
+                if (!ReferenceEquals(_noteEditSnapshot?.OwningLine, note.OwningLine) ||
+                    _noteEditSnapshot?.StartBeat.Value != note.StartBeat.Value ||
+                    _noteEditSnapshot?.PositionX != note.PositionX)
+                {
+                    _noteEditSnapshot = note.Clone();
+                }
+
                 NotesPanel.Visibility = Visibility.Visible;
                 NoteTypeBox.SelectedIndex = (int)note.Type - 1;
                 NoteStartBeatBox.Text = note.StartBeat.ToString();
@@ -727,10 +738,17 @@ public sealed partial class MainWindow : Window
                 // 只有 Hold 是有长度的音符，其余为瞬时音符，不显示结束拍。
                 NoteEndBeatPanel.Visibility = note.Type == NoteType.Hold ? Visibility.Visible : Visibility.Collapsed;
                 NotePositionXBox.Value = note.PositionX;
+                NoteFallDirectionBox.SelectedIndex = note.IsUp ? 0 : 1;
+                NoteSpeedBox.Value = note.Speed;
                 NotePositionYBox.Value = note.PositionY;
+                NoteTruthBox.SelectedIndex = note.IsFake ? 1 : 0;
+                NoteWidthBox.Value = note.Size;
+                NoteVisibleTimeBox.Value = note.VisibleTime;
+                NoteAlphaBox.Value = note.Alpha;
             }
             else
             {
+                _noteEditSnapshot = null;
                 NoteStartBeatBox.Text = string.Empty;
                 NoteEndBeatBox.Text = string.Empty;
             }
@@ -759,7 +777,6 @@ public sealed partial class MainWindow : Window
                     PhiEdit.Core.Easing.Easing.Count - 1);
                 EventEasingLeftBox.Value = item.EasingLeft;
                 EventEasingRightBox.Value = item.EasingRight;
-                EventHookedCheck.IsChecked = item.IsHooked;
                 EventLinkGroupBox.Value = item.LinkedGroup;
                 EventCurvePreview.Event = item;
             }
@@ -773,7 +790,6 @@ public sealed partial class MainWindow : Window
                 EventEndBeatBox.Text = string.Empty;
                 EventEasingLeftBox.Value = 0;
                 EventEasingRightBox.Value = 1;
-                EventHookedCheck.IsChecked = false;
                 EventCurvePreview.Event = null;
             }
         }
@@ -1053,6 +1069,7 @@ public sealed partial class MainWindow : Window
         note.Type = (NoteType)(NoteTypeBox.SelectedIndex + 1);
         _session.Document.IsDirty = true;
         NoteSurface.Invalidate();
+        RefreshInspector();
     }
 
     private void OnNotePositionXChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
@@ -1089,6 +1106,150 @@ public sealed partial class MainWindow : Window
         note.PositionY = e.NewValue;
         _session.Document.IsDirty = true;
         NoteSurface.Invalidate();
+    }
+
+    private void OnNoteFallDirectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_refreshingInspector || NoteFallDirectionBox.SelectedIndex < 0)
+        {
+            return;
+        }
+
+        var note = _session.SelectedNotes.FirstOrDefault();
+        if (note is null)
+        {
+            return;
+        }
+
+        note.IsUp = NoteFallDirectionBox.SelectedIndex == 0;
+        _session.Document.IsDirty = true;
+        NoteSurface.Invalidate();
+    }
+
+    private void OnNoteSpeedChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
+    {
+        if (_refreshingInspector || double.IsNaN(e.NewValue))
+        {
+            return;
+        }
+
+        var note = _session.SelectedNotes.FirstOrDefault();
+        if (note is null)
+        {
+            return;
+        }
+
+        note.Speed = e.NewValue;
+        _session.Document.IsDirty = true;
+    }
+
+    private void OnNoteTruthChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_refreshingInspector || NoteTruthBox.SelectedIndex < 0)
+        {
+            return;
+        }
+
+        var note = _session.SelectedNotes.FirstOrDefault();
+        if (note is null)
+        {
+            return;
+        }
+
+        note.IsFake = NoteTruthBox.SelectedIndex == 1;
+        _session.Document.IsDirty = true;
+        NoteSurface.Invalidate();
+    }
+
+    private void OnNoteWidthChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
+    {
+        if (_refreshingInspector || double.IsNaN(e.NewValue))
+        {
+            return;
+        }
+
+        var note = _session.SelectedNotes.FirstOrDefault();
+        if (note is null)
+        {
+            return;
+        }
+
+        note.Size = e.NewValue;
+        _session.Document.IsDirty = true;
+        NoteSurface.Invalidate();
+    }
+
+    private void OnNoteVisibleTimeChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
+    {
+        if (_refreshingInspector || double.IsNaN(e.NewValue))
+        {
+            return;
+        }
+
+        var note = _session.SelectedNotes.FirstOrDefault();
+        if (note is null)
+        {
+            return;
+        }
+
+        note.VisibleTime = e.NewValue;
+        _session.Document.IsDirty = true;
+    }
+
+    private void OnNoteAlphaChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
+    {
+        if (_refreshingInspector || double.IsNaN(e.NewValue))
+        {
+            return;
+        }
+
+        var note = _session.SelectedNotes.FirstOrDefault();
+        if (note is null)
+        {
+            return;
+        }
+
+        note.Alpha = Math.Clamp(e.NewValue, 0, 255);
+        _session.Document.IsDirty = true;
+        NoteSurface.Invalidate();
+    }
+
+    private void OnCancelNoteClick(object sender, RoutedEventArgs e)
+    {
+        var note = _session.SelectedNotes.FirstOrDefault();
+        if (note is null || _noteEditSnapshot is null)
+        {
+            return;
+        }
+
+        note.Type = _noteEditSnapshot.Type;
+        note.StartBeat = _noteEditSnapshot.StartBeat;
+        note.EndBeat = _noteEditSnapshot.EndBeat;
+        note.PositionX = _noteEditSnapshot.PositionX;
+        note.PositionY = _noteEditSnapshot.PositionY;
+        note.IsFake = _noteEditSnapshot.IsFake;
+        note.IsUp = _noteEditSnapshot.IsUp;
+        note.Speed = _noteEditSnapshot.Speed;
+        note.Size = _noteEditSnapshot.Size;
+        note.VisibleTime = _noteEditSnapshot.VisibleTime;
+        note.Alpha = _noteEditSnapshot.Alpha;
+        NoteSurface.Invalidate();
+        RefreshInspector();
+        StatusReadout.Text = "已取消修改";
+    }
+
+    private void OnSaveNoteClick(object sender, RoutedEventArgs e)
+    {
+        var note = _session.SelectedNotes.FirstOrDefault();
+        if (note is null)
+        {
+            return;
+        }
+
+        _noteEditSnapshot = note.Clone();
+        _session.Document.IsDirty = true;
+        NoteSurface.Invalidate();
+        StatusReadout.Text = "已保存音符";
     }
 
     /// <summary>编辑音符的起止拍。</summary>
@@ -1158,6 +1319,25 @@ public sealed partial class MainWindow : Window
         _session.Document.IsDirty = true;
         EventSurface.Invalidate();
         StatusReadout.Text = "已更新事件时间";
+    }
+
+    /// <summary>缓动下拉框支持鼠标滚轮切换选项。</summary>
+    private void OnEventEasingWheel(object sender, PointerRoutedEventArgs e)
+    {
+        var delta = e.GetCurrentPoint(EventEasingBox).Properties.MouseWheelDelta;
+        if (delta == 0 || EventEasingBox.Items.Count == 0)
+        {
+            return;
+        }
+
+        var next = Math.Clamp(EventEasingBox.SelectedIndex + (delta > 0 ? -1 : 1),
+            0, EventEasingBox.Items.Count - 1);
+        if (next != EventEasingBox.SelectedIndex)
+        {
+            EventEasingBox.SelectedIndex = next;
+        }
+
+        e.Handled = true;
     }
 
     /// <summary>编辑事件的缓动类型。</summary>
@@ -1255,24 +1435,6 @@ public sealed partial class MainWindow : Window
                     target.EasingRight = value;
                 }
             });
-    }
-
-    /// <summary>钩定：首值始终等于同类上一条事件的尾值。</summary>
-    private void OnEventHookedChanged(object sender, RoutedEventArgs e)
-    {
-        if (_refreshingInspector)
-        {
-            return;
-        }
-
-        var item = _session.SelectedEvents.FirstOrDefault();
-        if (item is null)
-        {
-            return;
-        }
-
-        var hooked = EventHookedCheck.IsChecked == true;
-        CommitEventChange(hooked ? "钩定事件" : "取消钩定", item, target => target.IsHooked = hooked);
     }
 
     /// <summary>粘合：首值接到同类上一条事件的尾值。</summary>

@@ -152,6 +152,11 @@ public static class RpeJson
                 ["positionY"] = note.PositionY,
                 ["holdTime"] = WriteBeat(note.EndBeat),
                 ["isFake"] = note.IsFake,
+                ["up"] = note.IsUp ? 1 : 0,
+                ["speed"] = note.Speed,
+                ["size"] = note.Size,
+                ["visualTime"] = note.VisibleTime,
+                ["alpha"] = note.Alpha,
                 ["judgeLineNumber"] = line.Number,
             });
         }
@@ -272,6 +277,11 @@ public static class RpeJson
                     PositionX = GetDouble(noteElement, "positionX"),
                     PositionY = GetDouble(noteElement, "positionY"),
                     IsFake = GetBool(noteElement, "isFake"),
+                    IsUp = !noteElement.TryGetProperty("up", out var upValue) || upValue.GetDouble() != 0,
+                    Speed = GetDouble(noteElement, "speed", 1),
+                    Size = GetDouble(noteElement, "size", 1),
+                    VisibleTime = GetDouble(noteElement, "visualTime", 999999),
+                    Alpha = GetDouble(noteElement, "alpha", 255),
                 });
             }
         }

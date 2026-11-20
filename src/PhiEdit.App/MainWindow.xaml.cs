@@ -3,7 +3,6 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
 using PhiEdit.App.Controls;
 using PhiEdit.App.Services;
 using PhiEdit.Core.Beats;
@@ -39,6 +38,11 @@ public sealed partial class MainWindow : Window
     private string? _currentFilePath;
 
     private bool _refreshingInspector;
+
+    // 单一画布：这些别名让既有调用保持兼容，实际都指向同一块 EditorCanvas。
+    private EditorCanvas NoteSurface => EditorCanvas;
+    private EditorCanvas EventSurface => EditorCanvas;
+    private EditorCanvas BeatRuler => EditorCanvas;
 
     public MainWindow()
     {
@@ -591,10 +595,8 @@ public sealed partial class MainWindow : Window
 
     private void ApplySplitWidths()
     {
-        // 使用星号单位：窗口变窄时两个编辑区等比收缩，绝不会被右侧面板遮挡。
-        EditorArea.ColumnDefinitions[0].Width = new GridLength(_editorSplitRatio, GridUnitType.Star);
-        EditorArea.ColumnDefinitions[1].Width = new GridLength(28);
-        EditorArea.ColumnDefinitions[2].Width = new GridLength(1 - _editorSplitRatio, GridUnitType.Star);
+        // 左右半区现在由同一块画布按 SplitRatio 绘制，不再依赖两列布局。
+        EditorCanvas.SplitRatio = _editorSplitRatio;
 
         if (WorkspaceArea.ColumnDefinitions.Count >= 3)
         {
@@ -759,7 +761,7 @@ public sealed partial class MainWindow : Window
                 EventEasingRightBox.Value = item.EasingRight;
                 EventHookedCheck.IsChecked = item.IsHooked;
                 EventLinkGroupBox.Value = item.LinkedGroup;
-                UpdateEventCurvePreview(item);
+                EventCurvePreview.Event = item;
             }
             else
             {
@@ -772,31 +774,13 @@ public sealed partial class MainWindow : Window
                 EventEasingLeftBox.Value = 0;
                 EventEasingRightBox.Value = 1;
                 EventHookedCheck.IsChecked = false;
-                EventCurvePreview.Points = new PointCollection();
+                EventCurvePreview.Event = null;
             }
         }
         finally
         {
             _refreshingInspector = false;
         }
-    }
-
-    /// <summary>按选中事件的缓动参数更新属性页内的橙色曲线预览。</summary>
-    private void UpdateEventCurvePreview(LineEvent item)
-    {
-        var points = new PointCollection();
-        for (var index = 0; index <= 100; index++)
-        {
-            var progress = index / 100.0;
-            var eased = PhiEdit.Core.Easing.Easing.Evaluate(progress, item.Easing, item.EasingLeft, item.EasingRight);
-            points.Add(new Point(10 + progress * 240, 80 - eased * 60));
-        }
-
-        EventCurvePreview.Points = points;
-        var leftX = 10 + Math.Clamp(item.EasingLeft, 0, 1) * 240;
-        var rightX = 10 + Math.Clamp(item.EasingRight, 0, 1) * 240;
-        EventCurveLeftBound.X1 = EventCurveLeftBound.X2 = (float)leftX;
-        EventCurveRightBound.X1 = EventCurveRightBound.X2 = (float)rightX;
     }
 
     private void OnSessionChanged(object? sender, EventArgs e)

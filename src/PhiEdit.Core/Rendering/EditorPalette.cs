@@ -19,7 +19,7 @@ public sealed class EditorPalette
     public Color BeatLine { get; set; } = Color.FromArgb(255, 255, 59, 48);
 
     /// <summary>整拍线宽度（像素）。</summary>
-    public float BeatLineWidth { get; set; } = 5f;
+    public float BeatLineWidth { get; set; } = 6f;
 
     /// <summary>网格距编辑区左右边界的留白（像素）。</summary>
     public double GridInsetX { get; set; } = 28;
@@ -37,10 +37,10 @@ public sealed class EditorPalette
     public Color MinorSubdivision { get; set; } = Color.FromArgb(255, 74, 168, 78);
 
     /// <summary>细分线宽度（像素）。</summary>
-    public float SubdivisionWidth { get; set; } = 2.5f;
+    public float SubdivisionWidth { get; set; } = 3.5f;
 
     /// <summary>次级细分线宽度（像素）。</summary>
-    public float MinorSubdivisionWidth { get; set; } = 1.5f;
+    public float MinorSubdivisionWidth { get; set; } = 2f;
 
     /// <summary>细分线不透明度。</summary>
     public byte SubdivisionAlpha { get; set; } = 150;
@@ -61,10 +61,10 @@ public sealed class EditorPalette
     public byte VerticalAlpha { get; set; } = 150;
 
     /// <summary>竖线宽度（像素）。</summary>
-    public float VerticalWidth { get; set; } = 1f;
+    public float VerticalWidth { get; set; } = 2f;
 
     /// <summary>居中竖线宽度（像素），竖线数量为奇数时使用。</summary>
-    public float VerticalCenterWidth { get; set; } = 2.5f;
+    public float VerticalCenterWidth { get; set; } = 3.5f;
 
     /// <summary>拍号文字颜色。</summary>
     public Color BeatLabel { get; set; } = Color.FromArgb(255, 224, 224, 224);

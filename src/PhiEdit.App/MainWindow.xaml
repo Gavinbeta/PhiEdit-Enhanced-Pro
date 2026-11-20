@@ -127,32 +127,11 @@
         <!-- 主体：左侧编辑区（音符区 + 判定线区，从正中间分开），右侧属性面板 -->
         <Grid x:Name="WorkspaceArea" Grid.Row="2" ColumnDefinitions="*,Auto,360">
 
-            <Grid x:Name="EditorArea" Grid.Column="0" ColumnDefinitions="*,Auto,*" SizeChanged="OnEditorAreaSizeChanged">
-                <Grid Grid.Column="0">
-                    <Grid RowDefinitions="Auto,*">
-                        <Border Grid.Row="0" Background="{ThemeResource SurfaceAltBrush}" Padding="12,6">
-                            <TextBlock Text="音符区 — 当前判定线上的音符" FontSize="12"
-                                       Foreground="{ThemeResource TextSecondaryBrush}" />
-                        </Border>
-                        <controls:NoteSurface x:Name="NoteSurface" Grid.Row="1" />
-                    </Grid>
-                </Grid>
-
-                <!-- 原版左右半区共用一块画布，正中仅留窄槽放拍号与分割线。 -->
-                <Grid Grid.Column="1" x:Name="CenterGutter" Width="28">
-                    <controls:BeatRuler x:Name="BeatRuler" />
-                    <controls:ThinSplitter x:Name="EditorSplitter" Width="28" VerticalAlignment="Stretch" />
-                </Grid>
-
-                <Grid Grid.Column="2">
-                    <Grid RowDefinitions="Auto,*">
-                        <Border Grid.Row="0" Background="{ThemeResource SurfaceAltBrush}" Padding="12,6">
-                            <TextBlock Text="判定线区 — 判定线行为控制" FontSize="12"
-                                       Foreground="{ThemeResource TextSecondaryBrush}" />
-                        </Border>
-                        <controls:EventSurface x:Name="EventSurface" Grid.Row="1" />
-                    </Grid>
-                </Grid>
+            <!-- 音符区与判定线区由同一块 CanvasControl 绘制，只有一条可拖动的透明分隔条。 -->
+            <Grid x:Name="EditorArea" Grid.Column="0" SizeChanged="OnEditorAreaSizeChanged">
+                <controls:EditorCanvas x:Name="EditorCanvas" />
+                <controls:ThinSplitter x:Name="EditorSplitter" Width="6" HorizontalAlignment="Center"
+                                       VerticalAlignment="Stretch" />
             </Grid>
 
             <controls:ThinSplitter Grid.Column="1" x:Name="InspectorSplitter" />
@@ -270,19 +249,8 @@
                                            ValueChanged="OnEventLinkGroupChanged" />
                             </StackPanel>
 
-                            <Border Height="120" Background="#FF202328" BorderBrush="{ThemeResource StrokeBrush}"
-                                    BorderThickness="1" CornerRadius="4">
-                                <Canvas x:Name="EventCurveCanvas" Width="260" Height="110"
-                                        HorizontalAlignment="Center" VerticalAlignment="Center">
-                                    <Line x:Name="EventCurveAxis" X1="10" Y1="80" X2="250" Y2="80"
-                                          Stroke="#FF65748A" StrokeThickness="1" />
-                                    <Line x:Name="EventCurveLeftBound" X1="10" Y1="10" X2="10" Y2="88"
-                                          Stroke="#FF8DA4C7" StrokeThickness="1" StrokeDashArray="3,3" />
-                                    <Line x:Name="EventCurveRightBound" X1="250" Y1="10" X2="250" Y2="88"
-                                          Stroke="#FF8DA4C7" StrokeThickness="1" StrokeDashArray="3,3" />
-                                    <Polyline x:Name="EventCurvePreview" Stroke="#FFFFD76A" StrokeThickness="2" />
-                                </Canvas>
-                            </Border>
+                            <controls:EventCurveGraph x:Name="EventCurvePreview" Height="170"
+                                                      HorizontalAlignment="Stretch" />
 
                             <Grid ColumnDefinitions="*,*,*" RowDefinitions="Auto,Auto" HorizontalAlignment="Stretch">
                                 <Button Grid.Row="0" Grid.Column="0" Content="粘合" Margin="0,0,4,4"

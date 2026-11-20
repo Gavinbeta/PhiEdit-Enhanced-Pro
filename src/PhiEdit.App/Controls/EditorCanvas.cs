@@ -1,0 +1,1170 @@
+using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.UI.Xaml;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using PhiEdit.App.Services;
+using PhiEdit.Core.Beats;
+using PhiEdit.Core.Charts;
+using PhiEdit.Core.Editing;
+using PhiEdit.Core.Layout;
+using PhiEdit.Core.Rendering;
+using PhiEdit.Core.Skins;
+using System.Numerics;
+using Windows.Foundation;
+
+namespace PhiEdit.App.Controls;
+
+/// <summary>
+/// 唯一的编辑画布：一个 CanvasControl 同时绘制左侧音符区与右侧判定线区。
+///
+/// 两侧共用同一个 EditViewport、同一套网格参数与同一个选中状态；中间只保留一条
+/// 窄槽用于分隔和拍号，不存在两块独立画布，因此不会出现双重网格线或滚动不同步。
+/// </summary>
+public sealed class EditorCanvas : UserControl
+{
+    private const double GutterWidth = 24;
+    private const double HeaderHeight = 24;
+    private const double FooterHeight = 26;
+    private const double DragThreshold = 3;
+
+    private readonly CanvasControl _canvas = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        VerticalAlignment = VerticalAlignment.Stretch,
+    };
+
+    private EditorSession? _session;
+    private ChartEditor? _editor;
+
+    private double _splitRatio = 0.5;
+
+    private Note? _dragNote;
+    private LineEvent? _dragEvent;
+    private double _pressX;
+    private double _pressY;
+    private bool _noteDragMoved;
+    private bool _eventDragMoved;
+
+    private readonly List<NoteDragOrigin> _noteOrigins = new();
+    private readonly List<EventDragOrigin> _eventOrigins = new();
+
+    private enum MarqueeArea { None, Notes, Events }
+
+    private MarqueeArea _marqueeArea;
+    private double _marqueeStartX;
+    private double _marqueeStartY;
+    private double _marqueeCurrentX;
+    private double _marqueeCurrentY;
+    private bool _marqueeAppend;
+
+    private readonly record struct NoteDragOrigin(Note Note, double Beat, double End, double X);
+    private readonly record struct EventDragOrigin(LineEvent Event, double Start, double End, double StartValue, double EndValue);
+
+    public EditorCanvas()
+    {
+        Content = _canvas;
+        _canvas.Draw += OnDraw;
+        _canvas.CreateResources += (sender, _) => EnsureSkinLoaded(sender);
+        _canvas.SizeChanged += (_, _) => Invalidate();
+        _canvas.PointerPressed += OnPointerPressed;
+        _canvas.PointerMoved += OnPointerMoved;
+        _canvas.PointerReleased += OnPointerReleased;
+        _canvas.PointerCanceled += OnPointerReleased;
+        _canvas.PointerCaptureLost += (_, _) => EndDrag();
+        _canvas.DoubleTapped += OnDoubleTapped;
+        _canvas.IsTabStop = true;
+    }
+
+    public EditorPalette Palette { get; set; } = new();
+
+    public NoteSkinRenderer? Renderer { get; set; }
+
+    public double NoteSize { get; set; } = 200;
+
+    public ICanvasResourceCreator CanvasResourceCreator => _canvas;
+
+    public IReadOnlyList<EventTrackKind> Tracks { get; set; } = EventTrackKinds.Standard;
+
+    public event EventHandler<string>? SkinLoadFailed;
+
+    public event EventHandler? SelectionChanged;
+
+    public EditorSession? Session
+    {
+        get => _session;
+        set
+        {
+            if (_session is not null)
+            {
+                _session.Viewport.ViewChanged -= OnViewChanged;
+            }
+
+            _session = value;
+
+            if (_session is not null)
+            {
+                _session.Viewport.ViewChanged += OnViewChanged;
+            }
+
+            Invalidate();
+        }
+    }
+
+    public ChartEditor? Editor
+    {
+        get => _editor;
+        set => _editor = value;
+    }
+
+    /// <summary>左右半区分割位置（0–1），由主窗口的可拖动分隔条更新。</summary>
+    public double SplitRatio
+    {
+        get => _splitRatio;
+        set
+        {
+            _splitRatio = Math.Clamp(value, 0.15, 0.85);
+            Invalidate();
+        }
+    }
+
+    private void OnViewChanged(object? sender, EventArgs e) => Invalidate();
+
+    public void Invalidate() => _canvas.Invalidate();
+
+    private bool _skinLoading;
+    private bool _skinReloadPending;
+
+    public void RequestSkinReload()
+    {
+        _skinReloadPending = true;
+        Invalidate();
+    }
+
+    private void EnsureSkinLoaded(ICanvasResourceCreator creator)
+    {
+        var skin = _session?.Skins.Active;
+        var renderer = Renderer;
+        if (skin is null || renderer is null || _skinLoading)
+        {
+            return;
+        }
+
+        if (!_skinReloadPending && renderer.IsReady && renderer.Skin?.Id == skin.Id)
+        {
+            return;
+        }
+
+        _skinReloadPending = false;
+        _skinLoading = true;
+        _ = LoadSkinAsync(creator, skin, renderer);
+    }
+
+    private async Task LoadSkinAsync(ICanvasResourceCreator creator, NoteSkin skin, NoteSkinRenderer renderer)
+    {
+        try
+        {
+            await renderer.ApplyAsync(creator, skin);
+            Invalidate();
+        }
+        catch (Exception exception)
+        {
+            SkinLoadFailed?.Invoke(this, $"皮肤加载失败：{exception.Message}");
+        }
+        finally
+        {
+            _skinLoading = false;
+        }
+    }
+
+    private (double Split, double LeftWidth, double RightLeft, double RightWidth) Layout(double width)
+    {
+        var split = width * _splitRatio;
+        var leftWidth = Math.Max(80, split - GutterWidth / 2);
+        var rightLeft = Math.Min(width - 80, split + GutterWidth / 2);
+        return (split, leftWidth, rightLeft, Math.Max(80, width - rightLeft));
+    }
+
+    private void OnDraw(CanvasControl sender, CanvasDrawEventArgs args)
+    {
+        var session = _session;
+        var drawing = args.DrawingSession;
+        drawing.Clear(Palette.Surface.ToWinColor());
+
+        var width = _canvas.ActualWidth;
+        var height = _canvas.ActualHeight;
+        if (session is null || width <= 0 || height <= 0)
+        {
+            return;
+        }
+
+        EnsureSkinLoaded(sender);
+
+        var viewport = session.Viewport;
+        viewport.ViewportHeight = height;
+
+        var layout = Layout(width);
+        viewport.NoteWidth = layout.LeftWidth;
+
+        drawing.FillRectangle(new Rect(0, 0, (float)layout.LeftWidth, (float)height), Palette.Surface.ToWinColor());
+        drawing.FillRectangle(new Rect((float)layout.RightLeft, 0, (float)layout.RightWidth, (float)height),
+            Palette.SurfaceAlt.ToWinColor());
+        drawing.FillRectangle(new Rect((float)layout.LeftWidth, 0, (float)GutterWidth, (float)height),
+            Palette.PanelHeader.ToWinColor());
+
+        var playheadY = viewport.PlayheadY;
+        DrawTimeGrid(drawing, session, viewport, 0, layout.LeftWidth, playheadY, true);
+        DrawVerticalGrid(drawing, session, viewport, 0, layout.LeftWidth, playheadY);
+        DrawNotes(drawing, session, viewport, 0, layout.LeftWidth, height);
+
+        DrawTimeGrid(drawing, session, viewport, layout.RightLeft, layout.RightWidth, playheadY, true);
+        DrawChannelSeparators(drawing, layout.RightLeft, layout.RightWidth, playheadY);
+        DrawEvents(drawing, session, viewport, layout.RightLeft, layout.RightWidth, height);
+        DrawHeader(drawing, layout.RightLeft, layout.RightWidth);
+        DrawFooter(drawing, session, layout.RightLeft, layout.RightWidth, height);
+
+        DrawPlayhead(drawing, 0, layout.LeftWidth, playheadY);
+        DrawPlayhead(drawing, layout.RightLeft, layout.RightWidth, playheadY);
+        DrawMarquee(drawing);
+    }
+
+    private void DrawVerticalGrid(CanvasDrawingSession drawing, EditorSession session, EditViewport viewport,
+        double left, double width, double playheadY)
+    {
+        var gridTop = (float)Palette.GridInsetTop;
+        var gridBottom = (float)Math.Max(gridTop, playheadY - Palette.GridInsetBottom);
+        foreach (var stageX in session.Grid.Lines())
+        {
+            var x = (float)(left + viewport.StageXToPixel(stageX));
+            if (x < left - 2 || x > left + width + 2)
+            {
+                continue;
+            }
+
+            var center = Math.Abs(stageX) < 1e-6;
+            var strokeWidth = center && session.Grid.HasCenterLine ? Palette.VerticalCenterWidth : Palette.VerticalWidth;
+            drawing.DrawLine(x, gridTop, x, gridBottom,
+                EditorPalette.WithAlpha(Palette.VerticalLine, Palette.VerticalAlpha).ToWinColor(), strokeWidth);
+        }
+    }
+
+    private void DrawTimeGrid(CanvasDrawingSession drawing, EditorSession session, EditViewport viewport,
+        double left, double width, double playheadY, bool showLabels)
+    {
+        var gridLeft = (float)(left + Palette.GridInsetX);
+        var gridRight = (float)Math.Max(gridLeft + 1, left + width - Palette.GridInsetX);
+        var gridTop = Palette.GridInsetTop;
+        var gridBottom = Math.Max(gridTop, playheadY - Palette.GridInsetBottom);
+        var format = CanvasExtensions.TextFormat(12f, right: true);
+
+        foreach (var tick in GridLayout.Ticks(viewport.BottomBeat - 1, viewport.TopBeat + 1, session.Division))
+        {
+            if (tick.Beat < 0)
+            {
+                continue;
+            }
+
+            var y = viewport.YAtBeat(tick.Beat);
+            if (y < gridTop - 4 || y > gridBottom + 4)
+            {
+                continue;
+            }
+
+            switch (tick.Kind)
+            {
+                case GridTickKind.Beat:
+                    drawing.DrawLine(gridLeft, (float)y, gridRight, (float)y, Palette.BeatLine.ToWinColor(), Palette.BeatLineWidth);
+                    if (showLabels)
+                    {
+                        drawing.DrawText(tick.Beat.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
+                            new Vector2(gridRight - 4, (float)(y - 16)), Palette.BeatLabel.ToWinColor(), format);
+                    }
+                    break;
+                case GridTickKind.Subdivision:
+                    drawing.DrawLine(gridLeft, (float)y, gridRight, (float)y,
+                        EditorPalette.WithAlpha(Palette.Subdivision, Palette.SubdivisionAlpha).ToWinColor(),
+                        Palette.SubdivisionWidth);
+                    break;
+                default:
+                    drawing.DrawLine(gridLeft, (float)y, gridRight, (float)y,
+                        EditorPalette.WithAlpha(Palette.MinorSubdivision, Palette.MinorSubdivisionAlpha).ToWinColor(),
+                        Palette.MinorSubdivisionWidth);
+                    break;
+            }
+        }
+    }
+
+    private void DrawChannelSeparators(CanvasDrawingSession drawing, double left, double width, double playheadY)
+    {
+        var channelWidth = ChannelWidth(width);
+        var gridLeft = (float)(left + Palette.GridInsetX);
+        var gridTop = (float)Palette.GridInsetTop;
+        var gridBottom = (float)Math.Max(gridTop, playheadY - Palette.GridInsetBottom);
+        for (var index = 0; index <= Tracks.Count; index++)
+        {
+            var x = gridLeft + (float)(index * channelWidth);
+            drawing.DrawLine(x, gridTop, x, gridBottom,
+                EditorPalette.WithAlpha(Palette.EventColumnSeparator, 95).ToWinColor(), 1f);
+        }
+    }
+
+    private double ChannelWidth(double width) =>
+        Math.Max(1, width - Palette.GridInsetX * 2) / Math.Max(1, Tracks.Count);
+
+    private void DrawHeader(CanvasDrawingSession drawing, double left, double width)
+    {
+        var gridLeft = (float)(left + Palette.GridInsetX);
+        var gridWidth = (float)Math.Max(1, width - Palette.GridInsetX * 2);
+        drawing.FillRectangle(new Rect(gridLeft, 0, gridWidth, (float)HeaderHeight),
+            Palette.EventHeaderBackground.ToWinColor());
+        var format = CanvasExtensions.TextFormat(12f);
+        var channelWidth = ChannelWidth(width);
+        for (var channel = 0; channel < Tracks.Count; channel++)
+        {
+            drawing.DrawText(Tracks[channel].DisplayName(),
+                new Vector2(gridLeft + (float)(channel * channelWidth + 6), 4),
+                Palette.EventHeaderText.ToWinColor(), format);
+        }
+    }
+
+    private void DrawFooter(CanvasDrawingSession drawing, EditorSession session, double left, double width, double height)
+    {
+        var top = (float)(height - FooterHeight);
+        var gridLeft = (float)(left + Palette.GridInsetX);
+        var gridWidth = (float)Math.Max(1, width - Palette.GridInsetX * 2);
+        drawing.FillRectangle(new Rect(gridLeft, top, gridWidth, (float)FooterHeight),
+            Palette.EventHeaderBackground.ToWinColor());
+
+        var line = session.CurrentLine;
+        var beat = session.Viewport.Position;
+        var channelWidth = ChannelWidth(width);
+        var format = CanvasExtensions.TextFormat(13f, center: true);
+        for (var channel = 0; channel < Tracks.Count; channel++)
+        {
+            var kind = Tracks[channel];
+            var value = line is null ? 0 : CurrentValue(line, kind, session.CurrentLayer, beat);
+            var color = value < 0 ? Palette.EventValueBottom : Palette.EventValueTop;
+            drawing.DrawText(kind.FormatValue(value),
+                new Vector2(gridLeft + (float)(channel * channelWidth + channelWidth / 2), top + 5),
+                color.ToWinColor(), format);
+        }
+    }
+
+    private static double CurrentValue(JudgeLine line, EventTrackKind kind, int layer, double beat)
+    {
+        double? value = null;
+        foreach (var item in line.Track(kind, layer))
+        {
+            if (beat >= item.StartBeat.Value && beat <= item.EndBeat.Value && item.DurationBeats > 1e-9)
+            {
+                var progress = (beat - item.StartBeat.Value) / item.DurationBeats;
+                var eased = PhiEdit.Core.Easing.Easing.Evaluate(progress, item.Easing, item.EasingLeft, item.EasingRight);
+                return item.StartValue + (item.EndValue - item.StartValue) * eased;
+            }
+
+            if (item.EndBeat.Value <= beat + 1e-9)
+            {
+                value = item.EndValue;
+            }
+        }
+
+        return value ?? (kind is EventTrackKind.Alpha or EventTrackKind.Speed ? 1 : 0);
+    }
+
+    private void DrawPlayhead(CanvasDrawingSession drawing, double left, double width, double playheadY)
+    {
+        var gridLeft = (float)(left + Palette.GridInsetX);
+        var gridRight = (float)Math.Max(gridLeft + 1, left + width - Palette.GridInsetX);
+        drawing.DrawLine(gridLeft, (float)playheadY, gridRight, (float)playheadY,
+            EditorPalette.WithAlpha(Palette.Judgement, Palette.JudgementAlpha).ToWinColor(), Palette.JudgementWidth);
+    }
+
+    private void DrawMarquee(CanvasDrawingSession drawing)
+    {
+        if (_marqueeArea == MarqueeArea.None)
+        {
+            return;
+        }
+
+        var rect = new Rect(Math.Min(_marqueeStartX, _marqueeCurrentX), Math.Min(_marqueeStartY, _marqueeCurrentY),
+            Math.Abs(_marqueeCurrentX - _marqueeStartX), Math.Abs(_marqueeCurrentY - _marqueeStartY));
+        drawing.FillRectangle(rect, EditorPalette.WithAlpha(Palette.MarqueeFill, 40).ToWinColor());
+        drawing.DrawRectangle(rect, Palette.MarqueeStroke.ToWinColor(), 1f);
+    }
+
+    private double NoteScale(double paneWidth) => NoteSize * paneWidth / 1350.0;
+
+    private static double BaseWidth(double scale, Note note) => scale * Math.Abs(note.Size);
+
+    private void DrawNotes(CanvasDrawingSession drawing, EditorSession session, EditViewport viewport,
+        double left, double width, double height)
+    {
+        var line = session.CurrentLine;
+        if (line is null)
+        {
+            return;
+        }
+
+        var renderer = Renderer;
+        var skin = renderer?.Skin;
+        var textured = renderer is not null && renderer.IsReady && skin is not null;
+        var scale = NoteScale(width);
+        var simultaneous = session.Document.SimultaneousNotes();
+
+        foreach (var note in line.Notes)
+        {
+            var y = viewport.YAtBeat(note.StartBeat.Value);
+            var endY = viewport.YAtBeat(note.EndBeat.Value);
+            if (Math.Max(y, endY) < -60 || Math.Min(y, endY) > height + 60)
+            {
+                continue;
+            }
+
+            var x = (float)(left + viewport.StageXToPixel(note.PositionX));
+            var selected = session.SelectedNotes.Contains(note);
+            var highlighted = simultaneous.Contains(note);
+            var alpha = note.IsFake ? 0.45f : 1f;
+
+            if (textured && renderer is not null && skin is not null &&
+                DrawTextured(drawing, renderer, skin, note, x, y, endY, scale, highlighted, alpha))
+            {
+                if (selected)
+                {
+                    var bounds = NoteBounds(renderer, skin, note, x, y, endY, scale, highlighted);
+                    drawing.FillRectangle(bounds, EditorPalette.WithAlpha(Palette.SelectionFill, 90).ToWinColor());
+                    drawing.DrawRectangle(bounds, Palette.Selection.ToWinColor(), 2f);
+                }
+
+                continue;
+            }
+
+            var color = Palette.NoteColor(note.Type).ToWinColor();
+            var plainWidth = (float)BaseWidth(scale, note);
+            var plainHeight = 8f * (float)scale;
+            if (note.Type == NoteType.Hold && Math.Abs(endY - y) > 0.5)
+            {
+                var top = (float)Math.Min(y, endY);
+                var bodyHeight = (float)Math.Abs(endY - y);
+                drawing.FillRoundedRectangle(new Rect(x - plainWidth / 2, top, plainWidth, bodyHeight), 4, 4,
+                    EditorPalette.WithAlpha(Palette.NoteHold, 110).ToWinColor());
+                drawing.DrawRoundedRectangle(new Rect(x - plainWidth / 2, top, plainWidth, bodyHeight), 4, 4, color, 1.5f);
+            }
+
+            var headY = (float)y - plainHeight / 2;
+            drawing.FillRoundedRectangle(new Rect(x - plainWidth / 2, headY, plainWidth, plainHeight), 4, 4, color);
+            if (selected)
+            {
+                var bounds = new Rect(x - plainWidth / 2 - 3, headY - 3, plainWidth + 6, plainHeight + 6);
+                drawing.FillRectangle(bounds, EditorPalette.WithAlpha(Palette.SelectionFill, 90).ToWinColor());
+                drawing.DrawRectangle(bounds, Palette.Selection.ToWinColor(), 2f);
+            }
+        }
+    }
+
+    private static Rect NoteBounds(NoteSkinRenderer renderer, NoteSkin skin, Note note, float x,
+        double y, double endY, double scale, bool highlighted)
+    {
+        var baseWidth = BaseWidth(scale, note);
+        var noteWidth = (float)(baseWidth * (highlighted ? skin.HighlightScale : 1));
+
+        if (note.Type == NoteType.Hold)
+        {
+            var bitmap = renderer[highlighted ? "hold_mh.png" : "hold.png"];
+            if (bitmap is not null)
+            {
+                var geometryBitmap = highlighted ? renderer["hold.png"] ?? bitmap : bitmap;
+                var geometryAtlas = skin.Info.HoldAtlas;
+                var textureScale = noteWidth / Math.Max(1, geometryBitmap.Size.Width);
+                var headHeight = (float)(geometryAtlas[1] * textureScale);
+                var tailHeight = (float)(geometryAtlas[0] * textureScale);
+                var top = (float)Math.Min(y, endY);
+                var bottom = (float)Math.Max(y, endY);
+                return new Rect(x - noteWidth / 2, top, noteWidth, Math.Max(headHeight + tailHeight, bottom - top));
+            }
+        }
+
+        var texture = renderer[highlighted ? "click_mh.png" : "click.png"];
+        var height = noteWidth * (texture?.Size.Height ?? 8) / Math.Max(1, texture?.Size.Width ?? 1);
+        return new Rect(x - noteWidth / 2, (float)y - height / 2, noteWidth, height);
+    }
+
+    private static bool DrawTextured(CanvasDrawingSession drawing, NoteSkinRenderer renderer, NoteSkin skin,
+        Note note, float x, double y, double endY, double scale, bool highlighted, float opacity)
+    {
+        var baseWidth = BaseWidth(scale, note);
+        var noteWidth = baseWidth * (highlighted ? skin.HighlightScale : 1);
+
+        if (note.Type == NoteType.Hold)
+        {
+            return DrawHoldTextured(drawing, renderer, skin, x, y, endY, noteWidth, highlighted, opacity);
+        }
+
+        var name = note.Type switch
+        {
+            NoteType.Drag => highlighted ? "drag_mh.png" : "drag.png",
+            NoteType.Flick => highlighted ? "flick_mh.png" : "flick.png",
+            _ => highlighted ? "click_mh.png" : "click.png",
+        };
+
+        var bitmap = renderer[name];
+        if (bitmap is null)
+        {
+            return false;
+        }
+
+        var height = noteWidth * bitmap.Size.Height / Math.Max(1, bitmap.Size.Width);
+        drawing.DrawImage(bitmap,
+            new Rect(x - (float)noteWidth / 2, (float)y - (float)height / 2, (float)noteWidth, (float)height),
+            new Rect(0, 0, bitmap.Size.Width, bitmap.Size.Height), opacity);
+        return true;
+    }
+
+    private static bool DrawHoldTextured(CanvasDrawingSession drawing, NoteSkinRenderer renderer, NoteSkin skin,
+        float x, double y, double endY, double noteWidth, bool highlighted, float opacity)
+    {
+        var bitmap = renderer[highlighted ? "hold_mh.png" : "hold.png"];
+        if (bitmap is null)
+        {
+            return false;
+        }
+
+        var atlas = highlighted ? skin.Info.HoldAtlasMH : skin.Info.HoldAtlas;
+        var tailPixels = atlas[0];
+        var headPixels = atlas[1];
+        var imageHeight = bitmap.Size.Height;
+        var bodyPixels = imageHeight - tailPixels - headPixels;
+        if (bodyPixels <= 0)
+        {
+            return false;
+        }
+
+        var headY = Math.Max(y, endY);
+        var tailY = Math.Min(y, endY);
+        var geometryBitmap = highlighted ? renderer["hold.png"] ?? bitmap : bitmap;
+        var geometryAtlas = skin.Info.HoldAtlas;
+        var textureScale = noteWidth / Math.Max(1, geometryBitmap.Size.Width);
+        var headHeight = geometryAtlas[1] * textureScale;
+        var tailHeight = geometryAtlas[0] * textureScale;
+        var half = (float)noteWidth / 2;
+
+        var bodyTop = tailY + tailHeight;
+        var bodyBottom = headY - headHeight;
+        if (bodyBottom > bodyTop)
+        {
+            drawing.DrawImage(bitmap,
+                new Rect(x - half, (float)bodyTop, (float)noteWidth, (float)(bodyBottom - bodyTop)),
+                new Rect(0, tailPixels, bitmap.Size.Width, bodyPixels), opacity);
+        }
+
+        drawing.DrawImage(bitmap,
+            new Rect(x - half, (float)(headY - headHeight), (float)noteWidth, (float)headHeight),
+            new Rect(0, imageHeight - headPixels, bitmap.Size.Width, headPixels), opacity);
+
+        if (tailHeight > 0)
+        {
+            drawing.DrawImage(bitmap,
+                new Rect(x - half, (float)tailY, (float)noteWidth, (float)tailHeight),
+                new Rect(0, 0, bitmap.Size.Width, tailPixels), opacity);
+        }
+
+        return true;
+    }
+
+    private void DrawEvents(CanvasDrawingSession drawing, EditorSession session, EditViewport viewport,
+        double left, double width, double height)
+    {
+        var line = session.CurrentLine;
+        if (line is null)
+        {
+            return;
+        }
+
+        var channelWidth = ChannelWidth(width);
+        var barWidth = Math.Max(6, channelWidth * 0.62);
+        var gridLeft = left + Palette.GridInsetX;
+
+        for (var channel = 0; channel < Tracks.Count; channel++)
+        {
+            var kind = Tracks[channel];
+            var events = line.Track(kind, session.CurrentLayer);
+            if (events.Count == 0)
+            {
+                continue;
+            }
+
+            var barX = (float)(gridLeft + channel * channelWidth + (channelWidth - barWidth) / 2);
+            var visible = events.Where(item =>
+            {
+                var top = viewport.YAtBeat(item.EndBeat.Value);
+                var bottom = viewport.YAtBeat(item.StartBeat.Value);
+                return bottom >= -10 && top <= height + 10;
+            }).ToList();
+            var values = visible.SelectMany(item => new[] { item.StartValue, item.EndValue }).ToList();
+            var rangeMin = values.Count > 0 ? values.Min() : 0;
+            var rangeMax = values.Count > 0 ? values.Max() : 1;
+            if (Math.Abs(rangeMax - rangeMin) < 1e-9)
+            {
+                rangeMin -= 1;
+                rangeMax += 1;
+            }
+
+            foreach (var item in visible)
+            {
+                var top = viewport.YAtBeat(item.EndBeat.Value);
+                var bottom = viewport.YAtBeat(item.StartBeat.Value);
+                var rectTop = (float)Math.Max(0, top);
+                var rectBottom = (float)Math.Min(height, bottom);
+                var rectHeight = Math.Max(2f, rectBottom - rectTop);
+                var selected = session.SelectedEvents.Contains(item);
+                var fill = selected ? Palette.EventFillSelected : Palette.EventFill;
+                var stroke = selected ? Palette.EventStrokeSelected : Palette.EventStroke;
+
+                drawing.FillRectangle(new Rect(barX, rectTop, (float)barWidth, rectHeight),
+                    EditorPalette.WithAlpha(fill, 64).ToWinColor());
+                drawing.DrawRectangle(new Rect(barX, rectTop, (float)barWidth, rectHeight), stroke.ToWinColor(),
+                    selected ? 2f : 1f);
+                DrawEasingCurve(drawing, item, barX, (float)barWidth, rectTop, rectBottom, rangeMin, rangeMax);
+            }
+        }
+    }
+
+    private void DrawEasingCurve(CanvasDrawingSession drawing, LineEvent item, float barX, float barWidth,
+        float top, float bottom, double rangeMin, double rangeMax)
+    {
+        if (item.DurationBeats <= 1e-9 || bottom - top <= 2f)
+        {
+            return;
+        }
+
+        const int steps = 36;
+        const float padding = 4f;
+        var usableWidth = Math.Max(1f, barWidth - padding * 2);
+        var color = EditorPalette.WithAlpha(Palette.EventCurve, 240).ToWinColor();
+        Vector2? previous = null;
+
+        for (var step = 0; step <= steps; step++)
+        {
+            var progress = step / (double)steps;
+            var eased = PhiEdit.Core.Easing.Easing.Evaluate(progress, item.Easing, item.EasingLeft, item.EasingRight);
+            var value = item.StartValue + (item.EndValue - item.StartValue) * eased;
+            var normalized = Math.Clamp((value - rangeMin) / (rangeMax - rangeMin), 0, 1);
+            var point = new Vector2(barX + padding + (float)normalized * usableWidth,
+                bottom - (float)progress * (bottom - top));
+            if (previous is Vector2 last)
+            {
+                drawing.DrawLine(last, point, color, 1.5f);
+            }
+
+            previous = point;
+        }
+    }
+
+    // ---------------------------------------------------------------- 交互
+
+    private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (_session is null)
+        {
+            return;
+        }
+
+        var point = e.GetCurrentPoint(_canvas).Position;
+        var layout = Layout(_canvas.ActualWidth);
+        _pressX = point.X;
+        _pressY = point.Y;
+
+        if (point.X <= layout.LeftWidth)
+        {
+            BeginNoteInteraction(point, e);
+        }
+        else if (point.X >= layout.RightLeft)
+        {
+            BeginEventInteraction(point, e, layout);
+        }
+
+        e.Handled = true;
+    }
+
+    private void BeginNoteInteraction(Point point, PointerRoutedEventArgs e)
+    {
+        if (_session is null)
+        {
+            return;
+        }
+
+        var ctrl = e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Control);
+        var shift = e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Shift);
+        var hit = HitTestNote(point.X, point.Y);
+
+        if (hit is not null)
+        {
+            if (ctrl)
+            {
+                _session.SelectedEvents.Clear();
+                if (!_session.SelectedNotes.Remove(hit))
+                {
+                    _session.SelectedNotes.Add(hit);
+                }
+                RaiseSelectionChanged();
+                return;
+            }
+
+            if (_session.SelectedNotes.Contains(hit))
+            {
+                _session.SelectedEvents.Clear();
+            }
+            else
+            {
+                _session.SelectNote(hit);
+            }
+
+            RaiseSelectionChanged();
+            _dragNote = hit;
+            _noteDragMoved = false;
+            CaptureNoteOrigins();
+            _canvas.CapturePointer(e.Pointer);
+            return;
+        }
+
+        if (_session.Tool is not null && !shift && !ctrl)
+        {
+            _session.SelectedNotes.Clear();
+            _session.SelectedEvents.Clear();
+            RaiseSelectionChanged();
+            PlaceNote(point.X, point.Y);
+            return;
+        }
+
+        _marqueeArea = MarqueeArea.Notes;
+        _marqueeAppend = shift;
+        _marqueeStartX = _marqueeCurrentX = point.X;
+        _marqueeStartY = _marqueeCurrentY = point.Y;
+        if (!shift)
+        {
+            _session.SelectedNotes.Clear();
+            _session.SelectedEvents.Clear();
+            RaiseSelectionChanged();
+        }
+
+        _canvas.CapturePointer(e.Pointer);
+    }
+
+    private void BeginEventInteraction(Point point, PointerRoutedEventArgs e,
+        (double Split, double LeftWidth, double RightLeft, double RightWidth) layout)
+    {
+        if (_session is null)
+        {
+            return;
+        }
+
+        var ctrl = e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Control);
+        var shift = e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Shift);
+        var hit = HitTestEvent(point.X - layout.RightLeft, point.Y, layout.RightWidth);
+
+        if (hit is not null)
+        {
+            if (ctrl)
+            {
+                _session.SelectedNotes.Clear();
+                if (!_session.SelectedEvents.Remove(hit))
+                {
+                    _session.SelectedEvents.Add(hit);
+                }
+                RaiseSelectionChanged();
+                return;
+            }
+
+            if (_session.SelectedEvents.Contains(hit))
+            {
+                _session.SelectedNotes.Clear();
+            }
+            else
+            {
+                _session.SelectEvent(hit);
+            }
+
+            RaiseSelectionChanged();
+            _dragEvent = hit;
+            _eventDragMoved = false;
+            CaptureEventOrigins();
+            _canvas.CapturePointer(e.Pointer);
+            return;
+        }
+
+        _marqueeArea = MarqueeArea.Events;
+        _marqueeAppend = shift;
+        _marqueeStartX = _marqueeCurrentX = point.X;
+        _marqueeStartY = _marqueeCurrentY = point.Y;
+        if (!shift)
+        {
+            _session.SelectedEvents.Clear();
+            _session.SelectedNotes.Clear();
+            RaiseSelectionChanged();
+        }
+
+        _canvas.CapturePointer(e.Pointer);
+    }
+
+    private void CaptureNoteOrigins()
+    {
+        _noteOrigins.Clear();
+        foreach (var note in _session!.SelectedNotes)
+        {
+            _noteOrigins.Add(new NoteDragOrigin(note, note.StartBeat.Value, note.EndBeat.Value, note.PositionX));
+        }
+    }
+
+    private void CaptureEventOrigins()
+    {
+        _eventOrigins.Clear();
+        foreach (var item in _session!.SelectedEvents)
+        {
+            _eventOrigins.Add(new EventDragOrigin(item, item.StartBeat.Value, item.EndBeat.Value,
+                item.StartValue, item.EndValue));
+        }
+    }
+
+    private void OnPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (_session is null)
+        {
+            return;
+        }
+
+        var point = e.GetCurrentPoint(_canvas);
+        if (!point.Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        var position = point.Position;
+        if (_marqueeArea != MarqueeArea.None)
+        {
+            _marqueeCurrentX = position.X;
+            _marqueeCurrentY = position.Y;
+            Invalidate();
+            e.Handled = true;
+            return;
+        }
+
+        var viewport = _session.Viewport;
+        var beat = SnapBeat(viewport.BeatAtY(position.Y));
+
+        if (_dragNote is not null)
+        {
+            if (!_noteDragMoved && Math.Abs(position.X - _pressX) < DragThreshold &&
+                Math.Abs(position.Y - _pressY) < DragThreshold)
+            {
+                return;
+            }
+
+            var stageX = SnapX(viewport.PixelToStageX(position.X));
+            var origin = _noteOrigins[0];
+            var deltaBeat = beat - origin.Beat;
+            var deltaX = stageX - origin.X;
+            foreach (var state in _noteOrigins)
+            {
+                state.Note.StartBeat = Beat.FromValue(state.Beat + deltaBeat);
+                state.Note.EndBeat = Beat.FromValue(state.End + deltaBeat);
+                state.Note.PositionX = state.X + deltaX;
+            }
+
+            _noteDragMoved = true;
+            Invalidate();
+            e.Handled = true;
+            return;
+        }
+
+        if (_dragEvent is not null)
+        {
+            if (!_eventDragMoved && Math.Abs(position.X - _pressX) < DragThreshold &&
+                Math.Abs(position.Y - _pressY) < DragThreshold)
+            {
+                return;
+            }
+
+            var delta = beat - _eventOrigins[0].Start;
+            foreach (var state in _eventOrigins)
+            {
+                state.Event.StartBeat = Beat.FromValue(state.Start + delta);
+                state.Event.EndBeat = Beat.FromValue(state.End + delta);
+            }
+
+            _eventDragMoved = true;
+            Invalidate();
+            e.Handled = true;
+        }
+    }
+
+    private double SnapBeat(double beat)
+    {
+        if (_session!.SnapTime)
+        {
+            beat = Math.Round(beat * _session.Division, MidpointRounding.AwayFromZero) / _session.Division;
+        }
+
+        return Math.Max(0, beat);
+    }
+
+    private double SnapX(double stageX) => _session!.SnapX ? _session.Grid.Snap(stageX) : stageX;
+
+    private void OnPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        EndDrag();
+        e.Handled = true;
+    }
+
+    private void EndDrag()
+    {
+        if (_marqueeArea != MarqueeArea.None)
+        {
+            ApplyMarquee();
+            _marqueeArea = MarqueeArea.None;
+            Invalidate();
+            return;
+        }
+
+        if (_dragNote is not null)
+        {
+            var note = _dragNote;
+            _dragNote = null;
+            if (!_noteDragMoved || _session is null || _noteOrigins.Count == 0)
+            {
+                return;
+            }
+
+            var finals = _noteOrigins.Select(state =>
+                new NoteDragOrigin(state.Note, state.Note.StartBeat.Value, state.Note.EndBeat.Value, state.Note.PositionX)).ToList();
+            var origins = _noteOrigins.ToList();
+            ApplyNoteStates(origins);
+            _editor?.Undo.Push(new DelegateAction($"移动 {origins.Count} 个音符",
+                () => ApplyNoteStates(finals), () => ApplyNoteStates(origins)));
+            _session.Document.IsDirty = true;
+            RaiseSelectionChanged();
+            return;
+        }
+
+        if (_dragEvent is not null)
+        {
+            var item = _dragEvent;
+            _dragEvent = null;
+            if (!_eventDragMoved || _session is null || _eventOrigins.Count == 0)
+            {
+                return;
+            }
+
+            var finals = _eventOrigins.Select(state =>
+                new EventDragOrigin(state.Event, state.Event.StartBeat.Value, state.Event.EndBeat.Value,
+                    state.StartValue, state.EndValue)).ToList();
+            var origins = _eventOrigins.ToList();
+            ApplyEventStates(origins);
+            _editor?.Undo.Push(new DelegateAction($"移动 {origins.Count} 个事件",
+                () => ApplyEventStates(finals), () => ApplyEventStates(origins)));
+            _session.Document.IsDirty = true;
+            RaiseSelectionChanged();
+        }
+    }
+
+    private static void ApplyNoteStates(IEnumerable<NoteDragOrigin> states)
+    {
+        foreach (var state in states)
+        {
+            state.Note.StartBeat = Beat.FromValue(state.Beat);
+            state.Note.EndBeat = Beat.FromValue(state.End);
+            state.Note.PositionX = state.X;
+        }
+    }
+
+    private static void ApplyEventStates(IEnumerable<EventDragOrigin> states)
+    {
+        foreach (var state in states)
+        {
+            state.Event.StartBeat = Beat.FromValue(state.Start);
+            state.Event.EndBeat = Beat.FromValue(state.End);
+        }
+    }
+
+    private void ApplyMarquee()
+    {
+        if (_session is null || _session.CurrentLine is null)
+        {
+            return;
+        }
+
+        var viewport = _session.Viewport;
+        var left = Math.Min(_marqueeStartX, _marqueeCurrentX);
+        var right = Math.Max(_marqueeStartX, _marqueeCurrentX);
+        var top = Math.Min(_marqueeStartY, _marqueeCurrentY);
+        var bottom = Math.Max(_marqueeStartY, _marqueeCurrentY);
+
+        if (_marqueeArea == MarqueeArea.Notes)
+        {
+            if (!_marqueeAppend)
+            {
+                _session.SelectedNotes.Clear();
+            }
+
+            foreach (var note in _session.CurrentLine.Notes)
+            {
+                var x = viewport.StageXToPixel(note.PositionX);
+                var y = viewport.YAtBeat(note.StartBeat.Value);
+                if (x >= left && x <= right && y >= top && y <= bottom)
+                {
+                    _session.SelectedNotes.Add(note);
+                }
+            }
+        }
+        else if (_marqueeArea == MarqueeArea.Events)
+        {
+            if (!_marqueeAppend)
+            {
+                _session.SelectedEvents.Clear();
+            }
+
+            var layout = Layout(_canvas.ActualWidth);
+            var channelWidth = ChannelWidth(layout.RightWidth);
+            var barWidth = Math.Max(6, channelWidth * 0.62);
+            for (var channel = 0; channel < Tracks.Count; channel++)
+            {
+                var barX = layout.RightLeft + Palette.GridInsetX + channel * channelWidth + (channelWidth - barWidth) / 2;
+                if (barX + barWidth < left || barX > right)
+                {
+                    continue;
+                }
+
+                foreach (var item in _session.CurrentLine.Track(Tracks[channel], _session.CurrentLayer))
+                {
+                    var eventTop = viewport.YAtBeat(item.EndBeat.Value);
+                    var eventBottom = viewport.YAtBeat(item.StartBeat.Value);
+                    if (eventBottom >= top && eventTop <= bottom)
+                    {
+                        _session.SelectedEvents.Add(item);
+                    }
+                }
+            }
+        }
+
+        RaiseSelectionChanged();
+    }
+
+    private void PlaceNote(double x, double y)
+    {
+        if (_session?.CurrentLine is null || _editor is null)
+        {
+            return;
+        }
+
+        var beat = SnapBeat(_session.Viewport.BeatAtY(y));
+        var stageX = SnapX(_session.Viewport.PixelToStageX(x));
+        var note = _editor.PlaceNote(_session.CurrentLine, _session.Tool!.Value, Beat.FromValue(beat), stageX);
+        _session.SelectedNotes.Clear();
+        _session.SelectedNotes.Add(note);
+        RaiseSelectionChanged();
+    }
+
+    private void OnDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        if (_session?.CurrentLine is null || _editor is null)
+        {
+            return;
+        }
+
+        var position = e.GetPosition(_canvas);
+        var layout = Layout(_canvas.ActualWidth);
+        if (position.X < layout.RightLeft)
+        {
+            return;
+        }
+
+        var channelWidth = ChannelWidth(layout.RightWidth);
+        var gridLeft = layout.RightLeft + Palette.GridInsetX;
+        var channel = (int)((position.X - gridLeft) / Math.Max(1, channelWidth));
+        if (channel < 0 || channel >= Tracks.Count)
+        {
+            return;
+        }
+
+        var beat = SnapBeat(_session.Viewport.BeatAtY(position.Y));
+        var kind = Tracks[channel];
+        var current = CurrentValue(_session.CurrentLine, kind, _session.CurrentLayer, beat);
+        var item = _editor.AddEvent(_session.CurrentLine, kind, _session.CurrentLayer, Beat.FromValue(beat), current);
+        _session.SelectedEvents.Clear();
+        _session.SelectedEvents.Add(item);
+        RaiseSelectionChanged();
+    }
+
+    private Note? HitTestNote(double x, double y)
+    {
+        if (_session?.CurrentLine is null)
+        {
+            return null;
+        }
+
+        var viewport = _session.Viewport;
+        var scale = NoteScale(Layout(_canvas.ActualWidth).LeftWidth);
+        foreach (var note in _session.CurrentLine.Notes)
+        {
+            var noteY = viewport.YAtBeat(note.StartBeat.Value);
+            var endY = viewport.YAtBeat(note.EndBeat.Value);
+            var noteX = viewport.StageXToPixel(note.PositionX);
+            var noteWidth = BaseWidth(scale, note);
+            if (Math.Abs(noteX - x) > noteWidth / 2 + 2)
+            {
+                continue;
+            }
+
+            if (note.Type == NoteType.Hold)
+            {
+                if (y >= Math.Min(noteY, endY) - 6 && y <= Math.Max(noteY, endY) + 6)
+                {
+                    return note;
+                }
+            }
+            else if (Math.Abs(noteY - y) <= 9)
+            {
+                return note;
+            }
+        }
+
+        return null;
+    }
+
+    private LineEvent? HitTestEvent(double x, double y, double width)
+    {
+        if (_session?.CurrentLine is null)
+        {
+            return null;
+        }
+
+        var viewport = _session.Viewport;
+        var channelWidth = ChannelWidth(width);
+        var barWidth = Math.Max(6, channelWidth * 0.62);
+        var gridLeft = Palette.GridInsetX;
+        for (var channel = 0; channel < Tracks.Count; channel++)
+        {
+            var barX = gridLeft + channel * channelWidth + (channelWidth - barWidth) / 2;
+            if (x < barX - 4 || x > barX + barWidth + 4)
+            {
+                continue;
+            }
+
+            foreach (var item in _session.CurrentLine.Track(Tracks[channel], _session.CurrentLayer))
+            {
+                var top = viewport.YAtBeat(item.EndBeat.Value);
+                var bottom = viewport.YAtBeat(item.StartBeat.Value);
+                if (y >= Math.Min(top, bottom) - 4 && y <= Math.Max(top, bottom) + 4)
+                {
+                    return item;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private void RaiseSelectionChanged()
+    {
+        SelectionChanged?.Invoke(this, EventArgs.Empty);
+        Invalidate();
+    }
+}

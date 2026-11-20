@@ -83,8 +83,8 @@ public sealed class EditorCanvas : UserControl
         _canvas.PointerPressed += OnPointerPressed;
         _canvas.PointerMoved += OnPointerMoved;
         _canvas.PointerReleased += OnPointerReleased;
-        _canvas.PointerCanceled += OnPointerReleased;
-        _canvas.PointerCaptureLost += (_, _) => EndDrag();
+        _canvas.PointerCanceled += OnPointerCanceled;
+        _canvas.PointerCaptureLost += (_, _) => CancelDrag();
         _canvas.DoubleTapped += OnDoubleTapped;
         _canvas.IsTabStop = true;
     }
@@ -315,20 +315,6 @@ public sealed class EditorCanvas : UserControl
         }
     }
 
-    private void DrawChannelSeparators(CanvasDrawingSession drawing, double left, double width, double playheadY)
-    {
-        var channelWidth = ChannelWidth(width);
-        var gridLeft = (float)(left + Palette.GridInsetX);
-        var gridTop = (float)Palette.GridInsetTop;
-        var gridBottom = (float)Math.Max(gridTop, playheadY - Palette.GridInsetBottom);
-        for (var index = 0; index <= ActiveTracks.Count; index++)
-        {
-            var x = gridLeft + (float)(index * channelWidth);
-            drawing.DrawLine(x, gridTop, x, gridBottom,
-                EditorPalette.WithAlpha(Palette.EventColumnSeparator, 95).ToWinColor(), 1f);
-        }
-    }
-
     private double ChannelWidth(double width) =>
         Math.Max(1, width - Palette.GridInsetX * 2) / Math.Max(1, ActiveTracks.Count);
 
@@ -472,33 +458,6 @@ public sealed class EditorCanvas : UserControl
                 drawing.DrawRectangle(bounds, Palette.Selection.ToWinColor(), 2f);
             }
         }
-    }
-
-    private static Rect NoteBounds(NoteSkinRenderer renderer, NoteSkin skin, Note note, float x,
-        double y, double endY, double scale, bool highlighted)
-    {
-        var baseWidth = BaseWidth(scale, note);
-        var noteWidth = (float)(baseWidth * (highlighted ? skin.HighlightScale : 1));
-
-        if (note.Type == NoteType.Hold)
-        {
-            var bitmap = renderer[highlighted ? "hold_mh.png" : "hold.png"];
-            if (bitmap is not null)
-            {
-                var geometryBitmap = highlighted ? renderer["hold.png"] ?? bitmap : bitmap;
-                var geometryAtlas = skin.Info.HoldAtlas;
-                var textureScale = noteWidth / Math.Max(1, geometryBitmap.Size.Width);
-                var headHeight = (float)(geometryAtlas[1] * textureScale);
-                var tailHeight = (float)(geometryAtlas[0] * textureScale);
-                var top = (float)Math.Min(y, endY);
-                var bottom = (float)Math.Max(y, endY);
-                return new Rect(x - noteWidth / 2, top, noteWidth, Math.Max(headHeight + tailHeight, bottom - top));
-            }
-        }
-
-        var texture = renderer[highlighted ? "click_mh.png" : "click.png"];
-        var height = noteWidth * (texture?.Size.Height ?? 8) / Math.Max(1, texture?.Size.Width ?? 1);
-        return new Rect(x - noteWidth / 2, (float)y - height / 2, noteWidth, height);
     }
 
     private static bool DrawTextured(CanvasDrawingSession drawing, NoteSkinRenderer renderer, NoteSkin skin,
@@ -976,6 +935,30 @@ public sealed class EditorCanvas : UserControl
         e.Handled = true;
     }
 
+    private void OnPointerCanceled(object sender, PointerRoutedEventArgs e)
+    {
+        CancelDrag();
+        e.Handled = true;
+    }
+
+    private void CancelDrag()
+    {
+        if (_dragNote is not null && _noteOrigins.Count > 0)
+        {
+            ApplyNoteStates(_noteOrigins);
+        }
+
+        if (_dragEvent is not null && _eventOrigins.Count > 0)
+        {
+            ApplyEventStates(_eventOrigins);
+        }
+
+        _dragNote = null;
+        _dragEvent = null;
+        _marqueeArea = MarqueeArea.None;
+        Invalidate();
+    }
+
     private void EndDrag()
     {
         if (_marqueeArea != MarqueeArea.None)
@@ -999,8 +982,16 @@ public sealed class EditorCanvas : UserControl
                 new NoteDragOrigin(state.Note, state.Note.StartBeat.Value, state.Note.EndBeat.Value, state.Note.PositionX)).ToList();
             var origins = _noteOrigins.ToList();
             ApplyNoteStates(origins);
-            _editor?.Undo.Push(new DelegateAction($"移动 {origins.Count} 个音符",
-                () => ApplyNoteStates(finals), () => ApplyNoteStates(origins)));
+            if (_editor is not null)
+            {
+                _editor.Undo.Push(new DelegateAction($"移动 {origins.Count} 个音符",
+                    () => ApplyNoteStates(finals), () => ApplyNoteStates(origins)));
+            }
+            else
+            {
+                ApplyNoteStates(finals);
+            }
+
             _session.Document.IsDirty = true;
             RaiseSelectionChanged();
             return;
@@ -1020,8 +1011,16 @@ public sealed class EditorCanvas : UserControl
                     state.StartValue, state.EndValue)).ToList();
             var origins = _eventOrigins.ToList();
             ApplyEventStates(origins);
-            _editor?.Undo.Push(new DelegateAction($"移动 {origins.Count} 个事件",
-                () => ApplyEventStates(finals), () => ApplyEventStates(origins)));
+            if (_editor is not null)
+            {
+                _editor.Undo.Push(new DelegateAction($"移动 {origins.Count} 个事件",
+                    () => ApplyEventStates(finals), () => ApplyEventStates(origins)));
+            }
+            else
+            {
+                ApplyEventStates(finals);
+            }
+
             _session.Document.IsDirty = true;
             RaiseSelectionChanged();
         }
@@ -1068,7 +1067,7 @@ public sealed class EditorCanvas : UserControl
 
             foreach (var note in _session.CurrentLine.Notes)
             {
-                var x = viewport.StageXToPixel(note.PositionX);
+                var x = Palette.GridInsetX + viewport.StageXToPixel(note.PositionX);
                 var y = viewport.YAtBeat(note.StartBeat.Value);
                 if (x >= left && x <= right && y >= top && y <= bottom)
                 {
@@ -1272,22 +1271,6 @@ public sealed class EditorCanvas : UserControl
         {
             drawing.DrawRectangle(rect, Windows.UI.Color.FromArgb(255, 255, 60, 60), 2f);
         }
-    }
-
-    private void PlaceNote(double x, double y)
-    {
-        if (_session?.CurrentLine is null || _editor is null)
-        {
-            return;
-        }
-
-        var beat = SnapBeat(_session.Viewport.BeatAtY(y));
-        var clampedX = ClampNotePixel(x, Layout(_canvas.ActualWidth).LeftWidth);
-        var stageX = SnapX(_session.Viewport.PixelToStageX(clampedX - Palette.GridInsetX));
-        var note = _editor.PlaceNote(_session.CurrentLine, _session.Tool!.Value, Beat.FromValue(beat), stageX);
-        _session.SelectedNotes.Clear();
-        _session.SelectedNotes.Add(note);
-        RaiseSelectionChanged();
     }
 
     private void OnDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)

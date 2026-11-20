@@ -561,20 +561,30 @@ public sealed class ChartEditor
                 }
             }));
 
-        created = _session.Document.AddLine();
         _session.Document.IsDirty = true;
-        return created;
+        return created!;
     }
 
     /// <summary>删除判定线及其全部音符与事件。</summary>
     public void RemoveLine(JudgeLine line)
     {
+        var index = _session.Document.Lines.IndexOf(line);
+        if (index < 0)
+        {
+            return;
+        }
+
         _session.Undo.Push(new DelegateAction(
             "删除判定线",
-            () => _session.Document.Lines.Add(line),
-            () => _session.Document.Lines.Remove(line)));
+            () => _session.Document.Lines.Remove(line),
+            () =>
+            {
+                if (!_session.Document.Lines.Contains(line))
+                {
+                    _session.Document.Lines.Insert(Math.Clamp(index, 0, _session.Document.Lines.Count), line);
+                }
+            }));
 
-        _session.Document.Lines.Remove(line);
         _session.Document.IsDirty = true;
     }
 

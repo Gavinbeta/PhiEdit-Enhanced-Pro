@@ -1,4 +1,5 @@
 using PhiEdit.Core.Beats;
+using System.Text.Json.Nodes;
 
 namespace PhiEdit.Core.Charts;
 
@@ -44,6 +45,9 @@ public sealed class Note
 
     /// <summary>所属判定线（由判定线在加入集合时回填）。</summary>
     public JudgeLine? OwningLine { get; internal set; }
+
+    /// <summary>读入时保留的原始音符节点，用于透传未知扩展字段。</summary>
+    public JsonObject? RawNode { get; set; }
 
     public Note Clone() => (Note)MemberwiseClone();
 
@@ -115,6 +119,9 @@ public sealed class LineEvent
 
     /// <summary>所属判定线（由判定线在加入集合时回填）。</summary>
     public JudgeLine? OwningLine { get; internal set; }
+
+    /// <summary>读入时保留的原始事件节点，用于透传未知扩展字段。</summary>
+    public JsonObject? RawNode { get; set; }
 
     public double DurationBeats => EndBeat.Value - StartBeat.Value;
 

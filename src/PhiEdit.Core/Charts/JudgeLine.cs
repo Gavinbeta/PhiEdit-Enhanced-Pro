@@ -1,5 +1,6 @@
 using PhiEdit.Core.Beats;
 using PhiEdit.Core.Editing;
+using System.Text.Json.Nodes;
 
 namespace PhiEdit.Core.Charts;
 
@@ -28,6 +29,9 @@ public sealed class JudgeLine
     public double Alpha { get; set; } = 1;
 
     public double Speed { get; set; } = 1;
+
+    /// <summary>读入时保留的原始判定线节点，用于透传未知扩展字段。</summary>
+    public JsonObject? RawNode { get; set; }
 
     /// <summary>是否为占位判定线。</summary>
     public bool IsFake { get; set; }

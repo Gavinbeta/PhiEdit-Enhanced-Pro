@@ -1,4 +1,5 @@
 using PhiEdit.Core.Beats;
+using System.Text.Json.Nodes;
 
 namespace PhiEdit.Core.Charts;
 
@@ -21,6 +22,9 @@ public sealed class ChartDocument
 
     /// <summary>文件格式版本，写出时使用。</summary>
     public int RpeVersion { get; set; } = 240;
+
+    /// <summary>读入时保留的原始根节点，用于写回时原样透传未知扩展字段。</summary>
+    public JsonObject? RawRoot { get; set; }
 
     public List<TempoPoint> BpmList { get; } = new()
     {

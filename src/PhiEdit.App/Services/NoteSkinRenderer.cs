@@ -40,6 +40,11 @@ public sealed class NoteSkinRenderer
             loaded[name] = await CanvasBitmap.LoadAsync(creator, random);
         }
 
+        foreach (var bitmap in _bitmaps.Values)
+        {
+            bitmap.Dispose();
+        }
+
         _bitmaps.Clear();
         foreach (var pair in loaded)
         {

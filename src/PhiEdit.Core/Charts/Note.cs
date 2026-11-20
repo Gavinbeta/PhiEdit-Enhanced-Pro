@@ -62,6 +62,12 @@ public sealed class LineEvent
     /// <summary>缓动编号，0 表示线性。</summary>
     public int Easing { get; set; }
 
+    /// <summary>缓动采样左边界，0 表示从曲线起点开始。</summary>
+    public double EasingLeft { get; set; }
+
+    /// <summary>缓动采样右边界，1 表示到曲线终点结束。</summary>
+    public double EasingRight { get; set; } = 1;
+
     /// <summary>被同组事件共享（联动）的标识。</summary>
     public int LinkedGroup { get; set; }
 

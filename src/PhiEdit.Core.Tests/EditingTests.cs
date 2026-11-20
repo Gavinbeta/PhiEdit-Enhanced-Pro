@@ -62,6 +62,43 @@ public class EditingTests
     }
 
     [Fact]
+    public void CutEvent_SamplesCurveAndIsUndoable()
+    {
+        var (session, editor) = CreateSession();
+        var line = session.CurrentLine!;
+        var item = editor.AddEvent(line, EventTrackKind.Y, 0, Beat.FromValue(0), 0, -100, Beat.FromValue(1));
+        item.Easing = 2;
+
+        var count = editor.CutEvent(item, 4);
+        var parts = line.Track(EventTrackKind.Y);
+        Assert.Equal(4, count);
+        Assert.Equal(4, parts.Count);
+        Assert.All(parts, part => Assert.Equal(1, part.Easing));
+        Assert.Equal(0, parts[0].StartValue, 6);
+        Assert.Equal(-100, parts[^1].EndValue, 6);
+
+        session.Undo.Undo();
+        var restored = line.Track(EventTrackKind.Y);
+        Assert.Single(restored);
+        Assert.Same(item, restored[0]);
+    }
+
+    [Fact]
+    public void SplitEvent_UsesEasedValueAtCut()
+    {
+        var (session, editor) = CreateSession();
+        var line = session.CurrentLine!;
+        var item = editor.AddEvent(line, EventTrackKind.X, 0, Beat.FromValue(0), 0, 100, Beat.FromValue(2));
+
+        Assert.True(editor.SplitEvent(item, Beat.FromValue(1)));
+        var parts = line.Track(EventTrackKind.X).OrderBy(part => part.StartBeat.Value).ToList();
+        Assert.Equal(2, parts.Count);
+        Assert.Equal(50, parts[0].EndValue, 6);
+        Assert.Equal(50, parts[1].StartValue, 6);
+        Assert.Equal(2, parts[1].EndBeat.Value, 6);
+    }
+
+    [Fact]
     public void UndoStack_ClearsRedoOnNewAction()
     {
         var (session, editor) = CreateSession();

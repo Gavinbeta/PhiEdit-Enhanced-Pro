@@ -128,7 +128,7 @@
         <Grid x:Name="WorkspaceArea" Grid.Row="2" ColumnDefinitions="*,Auto,360">
 
             <Grid x:Name="EditorArea" Grid.Column="0" ColumnDefinitions="*,Auto,*" SizeChanged="OnEditorAreaSizeChanged">
-                <Border Grid.Column="0" BorderBrush="{ThemeResource StrokeBrush}" BorderThickness="0,0,1,0">
+                <Grid Grid.Column="0">
                     <Grid RowDefinitions="Auto,*">
                         <Border Grid.Row="0" Background="{ThemeResource SurfaceAltBrush}" Padding="12,6">
                             <TextBlock Text="音符区 — 当前判定线上的音符" FontSize="12"
@@ -136,11 +136,15 @@
                         </Border>
                         <controls:NoteSurface x:Name="NoteSurface" Grid.Row="1" />
                     </Grid>
-                </Border>
+                </Grid>
 
-                <controls:ThinSplitter Grid.Column="1" x:Name="EditorSplitter" />
+                <!-- 原版左右半区共用一块画布，正中仅留窄槽放拍号与分割线。 -->
+                <Grid Grid.Column="1" x:Name="CenterGutter" Width="28">
+                    <controls:BeatRuler x:Name="BeatRuler" />
+                    <controls:ThinSplitter x:Name="EditorSplitter" Width="28" VerticalAlignment="Stretch" />
+                </Grid>
 
-                <Border Grid.Column="2" BorderBrush="{ThemeResource StrokeBrush}" BorderThickness="1,0,0,0">
+                <Grid Grid.Column="2">
                     <Grid RowDefinitions="Auto,*">
                         <Border Grid.Row="0" Background="{ThemeResource SurfaceAltBrush}" Padding="12,6">
                             <TextBlock Text="判定线区 — 判定线行为控制" FontSize="12"
@@ -148,7 +152,7 @@
                         </Border>
                         <controls:EventSurface x:Name="EventSurface" Grid.Row="1" />
                     </Grid>
-                </Border>
+                </Grid>
             </Grid>
 
             <controls:ThinSplitter Grid.Column="1" x:Name="InspectorSplitter" />
@@ -216,28 +220,28 @@
 
                         <!-- 事件属性 -->
                         <StackPanel x:Name="EventsPanel" Padding="14" Spacing="10" Visibility="Collapsed">
-                            <TextBlock Text="事件属性" Style="{StaticResource SectionTitleStyle}" />
+                            <TextBlock x:Name="EventInspectorTitle" Text="事件属性" Style="{StaticResource SectionTitleStyle}" />
                             <StackPanel Spacing="6">
                                 <TextBlock Text="轨道" Style="{StaticResource FieldLabelStyle}" />
                                 <TextBox x:Name="EventTrackBox" IsReadOnly="True" />
                             </StackPanel>
                             <StackPanel Spacing="6">
-                                <TextBlock Text="起始拍" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBlock Text="起始时间" Style="{StaticResource FieldLabelStyle}" />
                                 <TextBox x:Name="EventStartBeatBox" PlaceholderText="整数:分子/分母"
                                          LostFocus="OnEventBeatEdited" />
                             </StackPanel>
                             <StackPanel Spacing="6">
-                                <TextBlock Text="结束拍" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBlock Text="结束时间" Style="{StaticResource FieldLabelStyle}" />
                                 <TextBox x:Name="EventEndBeatBox" PlaceholderText="整数:分子/分母"
                                          LostFocus="OnEventBeatEdited" />
                             </StackPanel>
                             <StackPanel Spacing="6">
-                                <TextBlock Text="起始值" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBlock x:Name="EventStartValueLabel" Text="起点值" Style="{StaticResource FieldLabelStyle}" />
                                 <NumberBox x:Name="EventStartValueBox" SpinButtonPlacementMode="Compact"
                                            ValueChanged="OnEventValueChanged" />
                             </StackPanel>
                             <StackPanel Spacing="6">
-                                <TextBlock Text="结束值" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBlock x:Name="EventEndValueLabel" Text="终点值" Style="{StaticResource FieldLabelStyle}" />
                                 <NumberBox x:Name="EventEndValueBox" SpinButtonPlacementMode="Compact"
                                            ValueChanged="OnEventValueChanged" />
                             </StackPanel>
@@ -246,13 +250,54 @@
                                 <ComboBox x:Name="EventEasingBox" HorizontalAlignment="Stretch"
                                           SelectionChanged="OnEventEasingChanged" />
                             </StackPanel>
+                            <Grid ColumnDefinitions="*,*">
+                                <StackPanel Grid.Column="0" Spacing="6" Margin="0,0,6,0">
+                                    <TextBlock Text="缓动左边界" Style="{StaticResource FieldLabelStyle}" />
+                                    <NumberBox x:Name="EventEasingLeftBox" Minimum="0" Maximum="1" SmallChange="0.05"
+                                               SpinButtonPlacementMode="Compact" ValueChanged="OnEventEasingBoundChanged" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Spacing="6" Margin="6,0,0,0">
+                                    <TextBlock Text="缓动右边界" Style="{StaticResource FieldLabelStyle}" />
+                                    <NumberBox x:Name="EventEasingRightBox" Minimum="0" Maximum="1" SmallChange="0.05"
+                                               SpinButtonPlacementMode="Compact" ValueChanged="OnEventEasingBoundChanged" />
+                                </StackPanel>
+                            </Grid>
+                            <CheckBox x:Name="EventHookedCheck" Content="钩定" Checked="OnEventHookedChanged"
+                                      Unchecked="OnEventHookedChanged" />
                             <StackPanel Spacing="6">
                                 <TextBlock Text="绑定组" Style="{StaticResource FieldLabelStyle}" />
-                                <NumberBox x:Name="EventLinkGroupBox" SpinButtonPlacementMode="Compact"
+                                <NumberBox x:Name="EventLinkGroupBox" Minimum="0" SpinButtonPlacementMode="Compact"
                                            ValueChanged="OnEventLinkGroupChanged" />
                             </StackPanel>
-                            <Button x:Name="DeleteEventButton" Content="删除事件" HorizontalAlignment="Stretch"
-                                    Style="{StaticResource AccentButtonStyle}" Click="OnDeleteEventClick" />
+
+                            <Border Height="120" Background="#FF202328" BorderBrush="{ThemeResource StrokeBrush}"
+                                    BorderThickness="1" CornerRadius="4">
+                                <Canvas x:Name="EventCurveCanvas" Width="260" Height="110"
+                                        HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <Line x:Name="EventCurveAxis" X1="10" Y1="80" X2="250" Y2="80"
+                                          Stroke="#FF65748A" StrokeThickness="1" />
+                                    <Line x:Name="EventCurveLeftBound" X1="10" Y1="10" X2="10" Y2="88"
+                                          Stroke="#FF8DA4C7" StrokeThickness="1" StrokeDashArray="3,3" />
+                                    <Line x:Name="EventCurveRightBound" X1="250" Y1="10" X2="250" Y2="88"
+                                          Stroke="#FF8DA4C7" StrokeThickness="1" StrokeDashArray="3,3" />
+                                    <Polyline x:Name="EventCurvePreview" Stroke="#FFFFD76A" StrokeThickness="2" />
+                                </Canvas>
+                            </Border>
+
+                            <Grid ColumnDefinitions="*,*,*" RowDefinitions="Auto,Auto" HorizontalAlignment="Stretch">
+                                <Button Grid.Row="0" Grid.Column="0" Content="粘合" Margin="0,0,4,4"
+                                        Click="OnEventStickClick" HorizontalAlignment="Stretch" />
+                                <Button Grid.Row="0" Grid.Column="1" Content="切割" Margin="4,0,4,4"
+                                        Click="OnEventCutClick" HorizontalAlignment="Stretch" />
+                                <Button Grid.Row="0" Grid.Column="2" Content="随机" Margin="4,0,0,4"
+                                        Click="OnEventRandomClick" HorizontalAlignment="Stretch" />
+                                <Button Grid.Row="1" Grid.Column="0" Content="递推" Margin="0,4,4,0"
+                                        Click="OnEventRecurrenceClick" HorizontalAlignment="Stretch" />
+                                <Button Grid.Row="1" Grid.Column="1" Content="拆分" Margin="4,4,4,0"
+                                        Click="OnEventSplitClick" HorizontalAlignment="Stretch" />
+                                <Button Grid.Row="1" Grid.Column="2" Content="删除" Margin="4,4,0,0"
+                                        Click="OnDeleteEventClick" HorizontalAlignment="Stretch" />
+                            </Grid>
                         </StackPanel>
 
                         <!-- 判定线列表 -->

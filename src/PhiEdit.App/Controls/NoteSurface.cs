@@ -10,7 +10,6 @@ using PhiEdit.Core.Editing;
 using PhiEdit.Core.Layout;
 using PhiEdit.Core.Rendering;
 using PhiEdit.App.Services;
-using System.Numerics;
 using Windows.Foundation;
 
 namespace PhiEdit.App.Controls;
@@ -211,6 +210,8 @@ public sealed class NoteSurface : UserControl
         double width, double playheadY)
     {
         var grid = session.Grid;
+        var gridTop = (float)Palette.GridInsetTop;
+        var gridBottom = (float)Math.Max(gridTop, playheadY - Palette.GridInsetBottom);
         foreach (var stageX in grid.Lines())
         {
             var x = viewport.StageXToPixel(stageX);
@@ -221,7 +222,7 @@ public sealed class NoteSurface : UserControl
 
             var isCenter = Math.Abs(stageX) < 1e-6;
             var strokeWidth = isCenter && grid.HasCenterLine ? Palette.VerticalCenterWidth : Palette.VerticalWidth;
-            drawing.DrawLine((float)x, 0, (float)x, (float)playheadY,
+            drawing.DrawLine((float)x, gridTop, (float)x, gridBottom,
                 EditorPalette.WithAlpha(Palette.VerticalLine, Palette.VerticalAlpha).ToWinColor(), strokeWidth);
         }
     }
@@ -232,6 +233,10 @@ public sealed class NoteSurface : UserControl
     {
         var first = viewport.BottomBeat - 1;
         var last = viewport.TopBeat + 1;
+        var left = (float)Palette.GridInsetX;
+        var right = (float)Math.Max(left + 1, width - Palette.GridInsetX);
+        var gridTop = Palette.GridInsetTop;
+        var gridBottom = Math.Max(gridTop, playheadY - Palette.GridInsetBottom);
 
         foreach (var tick in GridLayout.Ticks(first, last, session.Division))
         {
@@ -241,7 +246,7 @@ public sealed class NoteSurface : UserControl
             }
 
             var y = viewport.YAtBeat(tick.Beat);
-            if (y < -4 || y > playheadY + 4)
+            if (y < gridTop - 4 || y > gridBottom + 4)
             {
                 continue;
             }
@@ -249,26 +254,20 @@ public sealed class NoteSurface : UserControl
             switch (tick.Kind)
             {
                 case GridTickKind.Beat:
-                    drawing.DrawLine(0, (float)y, (float)width, (float)y, Palette.BeatLine.ToWinColor(), Palette.BeatLineWidth);
-                    DrawBeatLabel(drawing, tick.Beat, width, y);
+                    drawing.DrawLine(left, (float)y, right, (float)y, Palette.BeatLine.ToWinColor(), Palette.BeatLineWidth);
                     break;
                 case GridTickKind.Subdivision:
-                    drawing.DrawLine(0, (float)y, (float)width, (float)y,
-                        EditorPalette.WithAlpha(Palette.Subdivision, Palette.SubdivisionAlpha).ToWinColor(), 1f);
+                    drawing.DrawLine(left, (float)y, right, (float)y,
+                        EditorPalette.WithAlpha(Palette.Subdivision, Palette.SubdivisionAlpha).ToWinColor(),
+                        Palette.SubdivisionWidth);
                     break;
                 default:
-                    drawing.DrawLine(0, (float)y, (float)width, (float)y,
-                        EditorPalette.WithAlpha(Palette.MinorSubdivision, Palette.MinorSubdivisionAlpha).ToWinColor(), 1f);
+                    drawing.DrawLine(left, (float)y, right, (float)y,
+                        EditorPalette.WithAlpha(Palette.MinorSubdivision, Palette.MinorSubdivisionAlpha).ToWinColor(),
+                        Palette.MinorSubdivisionWidth);
                     break;
             }
         }
-    }
-
-    private void DrawBeatLabel(CanvasDrawingSession drawing, double beat, double width, double y)
-    {
-        var text = beat.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
-        var format = CanvasExtensions.TextFormat(12f, right: true);
-        drawing.DrawText(text, new Vector2((float)(width - 8), (float)(y - 16)), Palette.BeatLabel.ToWinColor(), format);
     }
 
     /// <summary>判定线（播放头）：固定在画布底部的粗灰线，压在所有内容之上。</summary>
@@ -290,7 +289,9 @@ public sealed class NoteSurface : UserControl
     private void DrawPlayhead(CanvasDrawingSession drawing, EditViewport viewport, double width, double playheadY)
     {
         var color = EditorPalette.WithAlpha(Palette.Judgement, Palette.JudgementAlpha).ToWinColor();
-        drawing.DrawLine(0, (float)playheadY, (float)width, (float)playheadY, color, Palette.JudgementWidth);
+        var left = (float)Palette.GridInsetX;
+        var right = (float)Math.Max(left + 1, width - Palette.GridInsetX);
+        drawing.DrawLine(left, (float)playheadY, right, (float)playheadY, color, Palette.JudgementWidth);
     }
 
     /// <summary>
@@ -389,10 +390,11 @@ public sealed class NoteSurface : UserControl
             var bitmap = renderer[highlighted ? "hold_mh.png" : "hold.png"];
             if (bitmap is not null)
             {
-                var atlas = highlighted ? skin.Info.HoldAtlasMH : skin.Info.HoldAtlas;
-                var textureScale = noteWidth / bitmap.Size.Width;
-                var headHeight = (float)(atlas[1] * textureScale);
-                var tailHeight = (float)(atlas[0] * textureScale);
+                var geometryBitmap = highlighted ? renderer["hold.png"] ?? bitmap : bitmap;
+                var geometryAtlas = skin.Info.HoldAtlas;
+                var textureScale = noteWidth / Math.Max(1, geometryBitmap.Size.Width);
+                var headHeight = (float)(geometryAtlas[1] * textureScale);
+                var tailHeight = (float)(geometryAtlas[0] * textureScale);
                 var top = (float)Math.Min(y, endY);
                 var bottom = (float)Math.Max(y, endY);
                 return new Rect(x - noteWidth / 2, top, noteWidth, Math.Max(headHeight + tailHeight, bottom - top));
@@ -465,9 +467,15 @@ public sealed class NoteSurface : UserControl
         // 时间自下而上流逝：起点（头部）在下方，终点（尾部）在上方。
         var headY = Math.Max(y, endY);
         var tailY = Math.Min(y, endY);
-        var textureScale = noteWidth / bitmap.Size.Width;
-        var headHeight = headPixels * textureScale;
-        var tailHeight = tailPixels * textureScale;
+
+        // 高亮贴图 _mh 的头部像素可能远大于普通贴图；若直接按它缩放，
+        // 多押 Hold 的头部会吃掉身体，看起来像“缩回去”。这里始终沿用普通贴图的
+        // 头/尾比例计算可视长度，高亮贴图只负责颜色与描边。
+        var geometryBitmap = highlighted ? renderer["hold.png"] ?? bitmap : bitmap;
+        var geometryAtlas = skin.Info.HoldAtlas;
+        var textureScale = noteWidth / Math.Max(1, geometryBitmap.Size.Width);
+        var headHeight = geometryAtlas[1] * textureScale;
+        var tailHeight = geometryAtlas[0] * textureScale;
         var half = (float)noteWidth / 2;
 
         // 身体：头部上方到尾部下方之间。

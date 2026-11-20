@@ -9,7 +9,6 @@ using PhiEdit.Core.Charts;
 using PhiEdit.Core.Editing;
 using PhiEdit.Core.Layout;
 using PhiEdit.Core.Rendering;
-using System.Globalization;
 using System.Numerics;
 using Windows.Foundation;
 
@@ -131,14 +130,16 @@ public sealed class EventSurface : UserControl
         viewport.ViewportHeight = height;
 
         var playheadY = viewport.PlayheadY;
-        var channelWidth = width / Math.Max(1, Tracks.Count);
+        var gridLeft = Palette.GridInsetX;
+        var gridWidth = Math.Max(1, width - Palette.GridInsetX * 2);
+        var channelWidth = gridWidth / Math.Max(1, Tracks.Count);
         var barWidth = Math.Max(6, channelWidth * 0.62);
 
         DrawTimeGrid(drawing, session, viewport, width, playheadY);
-        DrawChannelSeparators(drawing, width, playheadY, channelWidth);
-        DrawEvents(drawing, session, viewport, channelWidth, barWidth, width, height);
-        DrawHeader(drawing, channelWidth, width);
-        DrawFooter(drawing, session, channelWidth, width, height);
+        DrawChannelSeparators(drawing, gridLeft, playheadY, channelWidth);
+        DrawEvents(drawing, session, viewport, channelWidth, barWidth, gridLeft, width, height);
+        DrawHeader(drawing, gridLeft, channelWidth, gridWidth);
+        DrawFooter(drawing, session, gridLeft, channelWidth, gridWidth, width, height);
         DrawMarquee(drawing);
         DrawPlayhead(drawing, width, playheadY);
     }
@@ -148,6 +149,10 @@ public sealed class EventSurface : UserControl
     {
         var first = viewport.BottomBeat - 1;
         var last = viewport.TopBeat + 1;
+        var left = (float)Palette.GridInsetX;
+        var right = (float)Math.Max(left + 1, width - Palette.GridInsetX);
+        var gridTop = Palette.GridInsetTop;
+        var gridBottom = Math.Max(gridTop, playheadY - Palette.GridInsetBottom);
 
         foreach (var tick in GridLayout.Ticks(first, last, session.Division))
         {
@@ -157,7 +162,7 @@ public sealed class EventSurface : UserControl
             }
 
             var y = viewport.YAtBeat(tick.Beat);
-            if (y < -4 || y > playheadY + 4)
+            if (y < gridTop - 4 || y > gridBottom + 4)
             {
                 continue;
             }
@@ -165,35 +170,36 @@ public sealed class EventSurface : UserControl
             switch (tick.Kind)
             {
                 case GridTickKind.Beat:
-                    drawing.DrawLine(0, (float)y, (float)width, (float)y, Palette.BeatLine.ToWinColor(), Palette.BeatLineWidth);
-                    var format = CanvasExtensions.TextFormat(12f, right: true);
-                    drawing.DrawText(tick.Beat.ToString("0.##", CultureInfo.InvariantCulture),
-                        new Vector2((float)(width - 8), (float)(y - 16)), Palette.BeatLabel.ToWinColor(), format);
+                    drawing.DrawLine(left, (float)y, right, (float)y, Palette.BeatLine.ToWinColor(), Palette.BeatLineWidth);
                     break;
                 case GridTickKind.Subdivision:
-                    drawing.DrawLine(0, (float)y, (float)width, (float)y,
-                        EditorPalette.WithAlpha(Palette.Subdivision, Palette.SubdivisionAlpha).ToWinColor(), 1f);
+                    drawing.DrawLine(left, (float)y, right, (float)y,
+                        EditorPalette.WithAlpha(Palette.Subdivision, Palette.SubdivisionAlpha).ToWinColor(),
+                        Palette.SubdivisionWidth);
                     break;
                 default:
-                    drawing.DrawLine(0, (float)y, (float)width, (float)y,
-                        EditorPalette.WithAlpha(Palette.MinorSubdivision, Palette.MinorSubdivisionAlpha).ToWinColor(), 1f);
+                    drawing.DrawLine(left, (float)y, right, (float)y,
+                        EditorPalette.WithAlpha(Palette.MinorSubdivision, Palette.MinorSubdivisionAlpha).ToWinColor(),
+                        Palette.MinorSubdivisionWidth);
                     break;
             }
         }
     }
 
-    private void DrawChannelSeparators(CanvasDrawingSession drawing, double width, double playheadY, double channelWidth)
+    private void DrawChannelSeparators(CanvasDrawingSession drawing, double gridLeft, double playheadY, double channelWidth)
     {
         var color = EditorPalette.WithAlpha(Palette.EventColumnSeparator, 95).ToWinColor();
+        var gridTop = (float)Palette.GridInsetTop;
+        var gridBottom = (float)Math.Max(gridTop, playheadY - Palette.GridInsetBottom);
         for (var index = 0; index <= Tracks.Count; index++)
         {
-            var x = (float)(index * channelWidth);
-            drawing.DrawLine(x, 0, x, (float)playheadY, color, 1f);
+            var x = (float)(gridLeft + index * channelWidth);
+            drawing.DrawLine(x, gridTop, x, gridBottom, color, 1f);
         }
     }
 
     private void DrawEvents(CanvasDrawingSession drawing, EditorSession session, EditViewport viewport,
-        double channelWidth, double barWidth, double width, double height)
+        double channelWidth, double barWidth, double gridLeft, double width, double height)
     {
         var line = session.CurrentLine;
         if (line is null)
@@ -210,9 +216,24 @@ public sealed class EventSurface : UserControl
                 continue;
             }
 
-            var barX = (float)(channel * channelWidth + (channelWidth - barWidth) / 2);
+            var barX = (float)(gridLeft + channel * channelWidth + (channelWidth - barWidth) / 2);
+            // 同一轨道共用数值范围，短事件与连续事件都能画出正确的缓动形状。
+            var visible = events.Where(item =>
+            {
+                var eventTop = viewport.YAtBeat(item.EndBeat.Value);
+                var eventBottom = viewport.YAtBeat(item.StartBeat.Value);
+                return eventBottom >= -10 && eventTop <= height + 10;
+            }).ToList();
+            var values = visible.SelectMany(item => new[] { item.StartValue, item.EndValue }).ToList();
+            var rangeMin = values.Count > 0 ? values.Min() : 0;
+            var rangeMax = values.Count > 0 ? values.Max() : 1;
+            if (Math.Abs(rangeMax - rangeMin) < 1e-9)
+            {
+                rangeMin -= 1;
+                rangeMax += 1;
+            }
 
-            foreach (var item in events)
+            foreach (var item in visible)
             {
                 var top = viewport.YAtBeat(item.EndBeat.Value);
                 var bottom = viewport.YAtBeat(item.StartBeat.Value);
@@ -234,58 +255,66 @@ public sealed class EventSurface : UserControl
                 drawing.DrawRectangle(new Rect(barX, rectTop, (float)barWidth, rectHeight), stroke.ToWinColor(),
                     selected ? 2f : 1f);
 
-                DrawEasingCurve(drawing, item, barX + (float)barWidth / 2, rectTop, rectBottom);
+                DrawEasingCurve(drawing, item, barX, (float)barWidth, rectTop, rectBottom, rangeMin, rangeMax);
             }
         }
     }
 
     /// <summary>
-    /// 在事件条内绘制缓动曲线：起点值在下、终点值在上，与原版一致。
+    /// 在事件条内绘制缓动曲线：横轴为数值（左小右大），纵轴为时间（下起点、上终点）。
+    /// 这样正弦、二次等缓动会呈现原版的橙色曲线，而不是一条竖线。
     /// </summary>
-    private void DrawEasingCurve(CanvasDrawingSession drawing, LineEvent item, float centerX, float top, float bottom)
+    private void DrawEasingCurve(CanvasDrawingSession drawing, LineEvent item, float barX, float barWidth,
+        float top, float bottom, double rangeMin, double rangeMax)
     {
-        var duration = item.DurationBeats;
-        if (duration <= 1e-9 || Math.Abs(item.EndValue - item.StartValue) < 1e-9)
+        if (item.DurationBeats <= 1e-9 || bottom - top <= 2f)
         {
             return;
         }
 
-        const int steps = 24;
-        var path = new List<Vector2>(steps + 1);
+        const int steps = 36;
+        const float padding = 4f;
+        var usableWidth = Math.Max(1f, barWidth - padding * 2);
+        var color = EditorPalette.WithAlpha(Palette.EventCurve, 240).ToWinColor();
+        Vector2? previous = null;
+
         for (var step = 0; step <= steps; step++)
         {
             var progress = step / (double)steps;
-            var eased = Easing.Evaluate(progress, Math.Max(1, item.Easing));
+            var eased = Easing.Evaluate(progress, item.Easing, item.EasingLeft, item.EasingRight);
             var value = item.StartValue + (item.EndValue - item.StartValue) * eased;
-            var ratio = (value - item.StartValue) / (item.EndValue - item.StartValue);
-            var y = bottom - (float)ratio * (bottom - top);
-            path.Add(new Vector2(centerX, y));
-        }
+            var normalized = Math.Clamp((value - rangeMin) / (rangeMax - rangeMin), 0, 1);
+            var point = new Vector2(
+                barX + padding + (float)normalized * usableWidth,
+                bottom - (float)progress * (bottom - top));
+            if (previous is Vector2 last)
+            {
+                drawing.DrawLine(last, point, color, 1.5f);
+            }
 
-        var color = EditorPalette.WithAlpha(Palette.EventStroke, 210).ToWinColor();
-        for (var index = 1; index < path.Count; index++)
-        {
-            drawing.DrawLine(path[index - 1], path[index], color, 1.5f);
+            previous = point;
         }
     }
 
-    private void DrawHeader(CanvasDrawingSession drawing, double channelWidth, double width)
+    private void DrawHeader(CanvasDrawingSession drawing, double gridLeft, double channelWidth, double gridWidth)
     {
-        drawing.FillRectangle(new Rect(0, 0, (float)width, (float)HeaderHeight), Palette.EventHeaderBackground.ToWinColor());
+        drawing.FillRectangle(new Rect((float)gridLeft, 0, (float)gridWidth, (float)HeaderHeight),
+            Palette.EventHeaderBackground.ToWinColor());
         var format = CanvasExtensions.TextFormat(12f);
         for (var channel = 0; channel < Tracks.Count; channel++)
         {
-            var x = (float)(channel * channelWidth + 6);
+            var x = (float)(gridLeft + channel * channelWidth + 6);
             drawing.DrawText(Tracks[channel].DisplayName(), new Vector2(x, 4), Palette.EventHeaderText.ToWinColor(), format);
         }
     }
 
     /// <summary>底栏：显示各轨道在判定线处的当前数值。</summary>
     private void DrawFooter(CanvasDrawingSession drawing, EditorSession session,
-        double channelWidth, double width, double height)
+        double gridLeft, double channelWidth, double gridWidth, double width, double height)
     {
         var top = (float)(height - FooterHeight);
-        drawing.FillRectangle(new Rect(0, top, (float)width, (float)FooterHeight), Palette.EventHeaderBackground.ToWinColor());
+        drawing.FillRectangle(new Rect((float)gridLeft, top, (float)gridWidth, (float)FooterHeight),
+            Palette.EventHeaderBackground.ToWinColor());
 
         var line = session.CurrentLine;
         var beat = session.Viewport.Position;
@@ -297,7 +326,7 @@ public sealed class EventSurface : UserControl
             var text = kind.FormatValue(value);
             var color = value < 0 ? Palette.EventValueBottom : Palette.EventValueTop;
             drawing.DrawText(text,
-                new Vector2((float)(channel * channelWidth + channelWidth / 2), top + 5),
+                new Vector2((float)(gridLeft + channel * channelWidth + channelWidth / 2), top + 5),
                 color.ToWinColor(), format);
         }
     }
@@ -321,7 +350,9 @@ public sealed class EventSurface : UserControl
     private void DrawPlayhead(CanvasDrawingSession drawing, double width, double playheadY)
     {
         var color = EditorPalette.WithAlpha(Palette.Judgement, Palette.JudgementAlpha).ToWinColor();
-        drawing.DrawLine(0, (float)playheadY, (float)width, (float)playheadY, color, Palette.JudgementWidth);
+        var left = (float)Palette.GridInsetX;
+        var right = (float)Math.Max(left + 1, width - Palette.GridInsetX);
+        drawing.DrawLine(left, (float)playheadY, right, (float)playheadY, color, Palette.JudgementWidth);
     }
 
     /// <summary>取某轨道在指定拍的当前数值（取该拍之前最后一条事件的结束值）。</summary>
@@ -331,6 +362,13 @@ public sealed class EventSurface : UserControl
         double? value = null;
         foreach (var item in events)
         {
+            if (beat >= item.StartBeat.Value && beat <= item.EndBeat.Value && item.DurationBeats > 1e-9)
+            {
+                var progress = (beat - item.StartBeat.Value) / item.DurationBeats;
+                var eased = Easing.Evaluate(progress, item.Easing, item.EasingLeft, item.EasingRight);
+                return item.StartValue + (item.EndValue - item.StartValue) * eased;
+            }
+
             if (item.EndBeat.Value <= beat + 1e-9)
             {
                 value = item.EndValue;
@@ -448,9 +486,11 @@ public sealed class EventSurface : UserControl
         }
 
         var position = e.GetPosition(_canvas);
-        var channelWidth = _canvas.ActualWidth / Math.Max(1, Tracks.Count);
-        var channel = (int)(position.X / Math.Max(1, channelWidth));
-        if (channel < 0 || channel >= Tracks.Count)
+        var gridLeft = Palette.GridInsetX;
+        var gridWidth = Math.Max(1, _canvas.ActualWidth - gridLeft * 2);
+        var channelWidth = gridWidth / Math.Max(1, Tracks.Count);
+        var channel = (int)((position.X - gridLeft) / Math.Max(1, channelWidth));
+        if (position.X < gridLeft || channel < 0 || channel >= Tracks.Count)
         {
             return;
         }
@@ -588,13 +628,15 @@ public sealed class EventSurface : UserControl
             _session.SelectedEvents.Clear();
         }
 
+        var gridLeft = Palette.GridInsetX;
+        var gridWidth = Math.Max(1, _canvas.ActualWidth - gridLeft * 2);
+        var channelWidth = gridWidth / Math.Max(1, Tracks.Count);
+        var barWidth = Math.Max(6, channelWidth * 0.62);
         for (var channel = 0; channel < Tracks.Count; channel++)
         {
             foreach (var item in _session.CurrentLine.Track(Tracks[channel], _session.CurrentLayer))
             {
-                var barX = channel * (_canvas.ActualWidth / Math.Max(1, Tracks.Count)) +
-                           (_canvas.ActualWidth / Math.Max(1, Tracks.Count) - Math.Max(6, _canvas.ActualWidth / Math.Max(1, Tracks.Count) * 0.62)) / 2;
-                var barWidth = Math.Max(6, _canvas.ActualWidth / Math.Max(1, Tracks.Count) * 0.62);
+                var barX = gridLeft + channel * channelWidth + (channelWidth - barWidth) / 2;
                 if (barX + barWidth < left || barX > right)
                 {
                     continue;
@@ -620,12 +662,14 @@ public sealed class EventSurface : UserControl
         }
 
         var viewport = _session.Viewport;
-        var channelWidth = _canvas.ActualWidth / Math.Max(1, Tracks.Count);
+        var gridLeft = Palette.GridInsetX;
+        var gridWidth = Math.Max(1, _canvas.ActualWidth - gridLeft * 2);
+        var channelWidth = gridWidth / Math.Max(1, Tracks.Count);
         var barWidth = Math.Max(6, channelWidth * 0.62);
 
         for (var channel = 0; channel < Tracks.Count; channel++)
         {
-            var barX = channel * channelWidth + (channelWidth - barWidth) / 2;
+            var barX = gridLeft + channel * channelWidth + (channelWidth - barWidth) / 2;
             if (x < barX - 4 || x > barX + barWidth + 4)
             {
                 continue;

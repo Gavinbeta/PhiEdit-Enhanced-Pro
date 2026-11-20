@@ -38,11 +38,21 @@ public sealed class EventSurface : UserControl
     private ChartEditor? _editor;
 
     private LineEvent? _dragEvent;
-    private Beat _dragOriginStart;
-    private Beat _dragOriginEnd;
     private double _pressX;
     private double _pressY;
     private bool _dragMoved;
+
+    /// <summary>拖动开始时整组选中项的原始状态。</summary>
+    private readonly List<DragOrigin> _dragOrigins = new();
+
+    private readonly record struct DragOrigin(LineEvent Event, EventTrackKind Kind, double Start, double End, double StartValue, double EndValue);
+
+    private bool _marquee;
+    private double _marqueeStartX;
+    private double _marqueeStartY;
+    private double _marqueeCurrentX;
+    private double _marqueeCurrentY;
+    private bool _marqueeAppend;
 
     public EventSurface()
     {
@@ -54,7 +64,6 @@ public sealed class EventSurface : UserControl
         _canvas.PointerReleased += OnPointerReleased;
         _canvas.PointerCanceled += OnPointerReleased;
         _canvas.PointerCaptureLost += (_, _) => EndDrag();
-        _canvas.PointerWheelChanged += OnPointerWheelChanged;
         _canvas.DoubleTapped += OnDoubleTapped;
         _canvas.IsTabStop = true;
     }
@@ -129,6 +138,7 @@ public sealed class EventSurface : UserControl
         DrawEvents(drawing, session, viewport, channelWidth, barWidth, width, height);
         DrawHeader(drawing, channelWidth, width);
         DrawFooter(drawing, session, channelWidth, width, height);
+        DrawMarquee(drawing);
         DrawPlayhead(drawing, width, playheadY);
     }
 
@@ -258,6 +268,21 @@ public sealed class EventSurface : UserControl
         }
     }
 
+    /// <summary>框选区域（橡皮筋）。</summary>
+    private void DrawMarquee(CanvasDrawingSession drawing)
+    {
+        if (!_marquee)
+        {
+            return;
+        }
+
+        var left = Math.Min(_marqueeStartX, _marqueeCurrentX);
+        var top = Math.Min(_marqueeStartY, _marqueeCurrentY);
+        var rect = new Rect(left, top, Math.Abs(_marqueeCurrentX - _marqueeStartX), Math.Abs(_marqueeCurrentY - _marqueeStartY));
+        drawing.FillRectangle(rect, EditorPalette.WithAlpha(Palette.MarqueeFill, 40).ToWinColor());
+        drawing.DrawRectangle(rect, Palette.MarqueeStroke.ToWinColor(), 1f);
+    }
+
     /// <summary>判定线（播放头）：固定在画布底部的粗灰线，压在所有内容之上。</summary>
     private void DrawPlayhead(CanvasDrawingSession drawing, double width, double playheadY)
     {
@@ -303,16 +328,34 @@ public sealed class EventSurface : UserControl
         _pressX = position.X;
         _pressY = position.Y;
 
+        var ctrl = e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Control);
+        var shift = e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Shift);
         var hit = HitTestEvent(position.X, position.Y);
 
         if (hit is not null)
         {
-            _session.SelectedEvents.Clear();
-            _session.SelectedEvents.Add(hit);
+            if (ctrl)
+            {
+                if (!_session.SelectedEvents.Remove(hit))
+                {
+                    _session.SelectedEvents.Add(hit);
+                }
+
+                SelectionChanged?.Invoke(this, EventArgs.Empty);
+                Invalidate();
+                e.Handled = true;
+                return;
+            }
+
+            if (!_session.SelectedEvents.Contains(hit))
+            {
+                _session.SelectedEvents.Clear();
+                _session.SelectedEvents.Add(hit);
+            }
+
             _dragEvent = hit;
-            _dragOriginStart = hit.StartBeat;
-            _dragOriginEnd = hit.EndBeat;
             _dragMoved = false;
+            CaptureDragOrigins();
             _canvas.CapturePointer(e.Pointer);
             SelectionChanged?.Invoke(this, EventArgs.Empty);
             Invalidate();
@@ -320,9 +363,38 @@ public sealed class EventSurface : UserControl
         }
         else
         {
-            _session.SelectedEvents.Clear();
-            SelectionChanged?.Invoke(this, EventArgs.Empty);
+            // 空白处：框选（Shift 为追加模式）。
+            _marquee = true;
+            _marqueeAppend = shift;
+            _marqueeStartX = _marqueeCurrentX = position.X;
+            _marqueeStartY = _marqueeCurrentY = position.Y;
+            if (!shift)
+            {
+                _session.SelectedEvents.Clear();
+                SelectionChanged?.Invoke(this, EventArgs.Empty);
+            }
+
+            _canvas.CapturePointer(e.Pointer);
             Invalidate();
+            e.Handled = true;
+        }
+    }
+
+    private void CaptureDragOrigins()
+    {
+        _dragOrigins.Clear();
+        foreach (var item in _session.SelectedEvents)
+        {
+            _dragOrigins.Add(new DragOrigin(item, item.Kind, item.StartBeat.Value, item.EndBeat.Value, item.StartValue, item.EndValue));
+        }
+    }
+
+    private static void ApplyStates(IEnumerable<DragOrigin> states)
+    {
+        foreach (var state in states)
+        {
+            state.Event.StartBeat = Beat.FromValue(state.Start);
+            state.Event.EndBeat = Beat.FromValue(state.End);
         }
     }
 
@@ -360,7 +432,7 @@ public sealed class EventSurface : UserControl
 
     private void OnPointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (_dragEvent is null || _session is null)
+        if (_session is null)
         {
             return;
         }
@@ -372,6 +444,21 @@ public sealed class EventSurface : UserControl
         }
 
         var position = point.Position;
+
+        if (_marquee)
+        {
+            _marqueeCurrentX = position.X;
+            _marqueeCurrentY = position.Y;
+            Invalidate();
+            e.Handled = true;
+            return;
+        }
+
+        if (_dragEvent is null)
+        {
+            return;
+        }
+
         if (!_dragMoved &&
             Math.Abs(position.X - _pressX) < DragThreshold &&
             Math.Abs(position.Y - _pressY) < DragThreshold)
@@ -387,9 +474,15 @@ public sealed class EventSurface : UserControl
         }
 
         beat = Math.Max(0, beat);
-        var duration = _dragOriginEnd.Value - _dragOriginStart.Value;
-        _dragEvent.StartBeat = Beat.FromValue(beat);
-        _dragEvent.EndBeat = Beat.FromValue(beat + duration);
+
+        var origin = _dragOrigins.Count > 0 ? _dragOrigins[0] : default;
+        var delta = beat - origin.Start;
+        foreach (var state in _dragOrigins)
+        {
+            state.Event.StartBeat = Beat.FromValue(state.Start + delta);
+            state.Event.EndBeat = Beat.FromValue(state.End + delta);
+        }
+
         _dragMoved = true;
         Invalidate();
         e.Handled = true;
@@ -403,37 +496,78 @@ public sealed class EventSurface : UserControl
 
     private void EndDrag()
     {
+        if (_marquee)
+        {
+            ApplyMarqueeSelection();
+            _marquee = false;
+            Invalidate();
+            return;
+        }
+
         var item = _dragEvent;
         _dragEvent = null;
-        if (item is null || !_dragMoved || _session is null)
+        if (item is null || !_dragMoved || _session is null || _dragOrigins.Count == 0)
         {
             return;
         }
 
-        var originStart = _dragOriginStart;
-        var originEnd = _dragOriginEnd;
-        var finalStart = item.StartBeat;
-        var finalEnd = item.EndBeat;
-
-        item.StartBeat = originStart;
-        item.EndBeat = originEnd;
+        var finals = _dragOrigins
+            .Select(state => new DragOrigin(state.Event, state.Kind, state.Event.StartBeat.Value, state.Event.EndBeat.Value, state.StartValue, state.EndValue))
+            .ToList();
+        var origins = _dragOrigins.ToList();
+        ApplyStates(origins);
 
         _editor?.Undo.Push(new DelegateAction(
-            "移动事件",
-            () =>
-            {
-                item.StartBeat = finalStart;
-                item.EndBeat = finalEnd;
-            },
-            () =>
-            {
-                item.StartBeat = originStart;
-                item.EndBeat = originEnd;
-            }));
+            $"移动 {origins.Count} 个事件",
+            () => ApplyStates(finals),
+            () => ApplyStates(origins)));
 
         _session.Document.IsDirty = true;
         SelectionChanged?.Invoke(this, EventArgs.Empty);
         Invalidate();
+    }
+
+    /// <summary>按框选区域确定选中的事件。</summary>
+    private void ApplyMarqueeSelection()
+    {
+        if (_session?.CurrentLine is null)
+        {
+            return;
+        }
+
+        var viewport = _session.Viewport;
+        var left = Math.Min(_marqueeStartX, _marqueeCurrentX);
+        var right = Math.Max(_marqueeStartX, _marqueeCurrentX);
+        var top = Math.Min(_marqueeStartY, _marqueeCurrentY);
+        var bottom = Math.Max(_marqueeStartY, _marqueeCurrentY);
+
+        if (!_marqueeAppend)
+        {
+            _session.SelectedEvents.Clear();
+        }
+
+        for (var channel = 0; channel < Tracks.Count; channel++)
+        {
+            foreach (var item in _session.CurrentLine.Track(Tracks[channel], _session.CurrentLayer))
+            {
+                var barX = channel * (_canvas.ActualWidth / Math.Max(1, Tracks.Count)) +
+                           (_canvas.ActualWidth / Math.Max(1, Tracks.Count) - Math.Max(6, _canvas.ActualWidth / Math.Max(1, Tracks.Count) * 0.62)) / 2;
+                var barWidth = Math.Max(6, _canvas.ActualWidth / Math.Max(1, Tracks.Count) * 0.62);
+                if (barX + barWidth < left || barX > right)
+                {
+                    continue;
+                }
+
+                var eventTop = viewport.YAtBeat(item.EndBeat.Value);
+                var eventBottom = viewport.YAtBeat(item.StartBeat.Value);
+                if (eventBottom >= top && eventTop <= bottom)
+                {
+                    _session.SelectedEvents.Add(item);
+                }
+            }
+        }
+
+        SelectionChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private LineEvent? HitTestEvent(double x, double y)
@@ -469,32 +603,4 @@ public sealed class EventSurface : UserControl
         return null;
     }
 
-    private void OnPointerWheelChanged(object sender, PointerRoutedEventArgs e)
-    {
-        if (_session is null)
-        {
-            return;
-        }
-
-        var delta = e.GetCurrentPoint(_canvas).Properties.MouseWheelDelta;
-        if (delta == 0)
-        {
-            return;
-        }
-
-        var position = e.GetCurrentPoint(_canvas).Position;
-        var viewport = _session.Viewport;
-        if (e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Control))
-        {
-            viewport.ZoomAt(position.Y, delta > 0 ? 1.15 : 1 / 1.15);
-        }
-        else
-        {
-            // 向下滚动 = 内容向下移动 = 看到更晚的拍。
-            viewport.ScrollByPixels(-delta * 0.6);
-        }
-
-        Invalidate();
-        e.Handled = true;
-    }
 }

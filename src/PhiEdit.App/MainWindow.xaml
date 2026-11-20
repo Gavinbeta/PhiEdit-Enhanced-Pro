@@ -153,10 +153,8 @@
                     BorderThickness="1,0,0,0">
                 <Grid RowDefinitions="Auto,*">
                     <StackPanel Grid.Row="0" Orientation="Horizontal" Padding="8,8,8,4">
-                        <ToggleButton x:Name="TabNotes" Style="{StaticResource InspectorTabStyle}" Click="OnTabClick"
-                                      Tag="notes" IsChecked="True" Content="音符" />
-                        <ToggleButton x:Name="TabEvents" Style="{StaticResource InspectorTabStyle}" Click="OnTabClick"
-                                      Tag="events" Content="事件" />
+                        <ToggleButton x:Name="TabEdit" Style="{StaticResource InspectorTabStyle}" Click="OnTabClick"
+                                      Tag="edit" IsChecked="True" Content="编辑" IsEnabled="False" />
                         <ToggleButton x:Name="TabLines" Style="{StaticResource InspectorTabStyle}" Click="OnTabClick"
                                       Tag="lines" Content="判定线" />
                         <ToggleButton x:Name="TabChart" Style="{StaticResource InspectorTabStyle}" Click="OnTabClick"
@@ -164,8 +162,17 @@
                     </StackPanel>
 
                     <Grid Grid.Row="1">
+                        <!-- 未选中任何对象 -->
+                        <StackPanel x:Name="EditHintPanel" Padding="14" Spacing="10" Visibility="Collapsed">
+                            <TextBlock Text="编辑" Style="{StaticResource SectionTitleStyle}" />
+                            <TextBlock Text="未选中音符或事件。在左侧音符区单击放置音符，在右侧判定线区双击新建事件。"
+                                       Style="{StaticResource StatusTextStyle}" TextWrapping="Wrap" />
+                            <TextBlock Text="提示：按住 Shift 拖动可框选，Ctrl+单击可加选，Ctrl+C / Ctrl+V 复制粘贴，Ctrl+M 镜像。"
+                                       Style="{StaticResource StatusTextStyle}" TextWrapping="Wrap" />
+                        </StackPanel>
+
                         <!-- 音符属性 -->
-                        <StackPanel x:Name="NotesPanel" Padding="14" Spacing="10">
+                        <StackPanel x:Name="NotesPanel" Padding="14" Spacing="10" Visibility="Collapsed">
                             <TextBlock Text="音符属性" Style="{StaticResource SectionTitleStyle}" />
                             <StackPanel Spacing="6">
                                 <TextBlock Text="类型" Style="{StaticResource FieldLabelStyle}" />
@@ -276,16 +283,38 @@
         <!-- 底栏 -->
         <Border Grid.Row="3" Background="{ThemeResource SurfaceBrush}" BorderBrush="{ThemeResource StrokeBrush}"
                 BorderThickness="0,1,0,0">
-            <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" Padding="16,6" MinHeight="38">
-                <TextBlock x:Name="TimeReadout" Grid.Column="0" Style="{StaticResource StatusTextStyle}"
-                           Text="0.00s / 0.00s" />
-                <TextBlock x:Name="BeatReadout" Grid.Column="1" Style="{StaticResource StatusTextStyle}"
+            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto" Padding="16,6" MinHeight="38">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                    <Button x:Name="CopyButton" Click="OnCopyClick" ToolTipService.ToolTip="复制 (Ctrl+C)">
+                        <FontIcon Glyph="&#xE8C8;" FontSize="15" />
+                    </Button>
+                    <Button x:Name="CutButton" Click="OnCutClick" ToolTipService.ToolTip="剪切 (Ctrl+X)">
+                        <FontIcon Glyph="&#xE8C6;" FontSize="15" />
+                    </Button>
+                    <Button x:Name="PasteButton" Click="OnPasteClick" ToolTipService.ToolTip="粘贴 (Ctrl+V)">
+                        <FontIcon Glyph="&#xE77F;" FontSize="15" />
+                    </Button>
+                    <Button x:Name="MirrorButton" Click="OnMirrorClick" ToolTipService.ToolTip="镜像 (Ctrl+M)">
+                        <FontIcon Glyph="&#xE8A1;" FontSize="15" />
+                    </Button>
+                    <Button x:Name="DeleteButton" Click="OnDeleteSelectionClick" ToolTipService.ToolTip="删除 (Delete)">
+                        <FontIcon Glyph="&#xE74D;" FontSize="15" />
+                    </Button>
+                    <Button x:Name="ClearClipboardButton" Click="OnClearClipboardClick" ToolTipService.ToolTip="清空剪贴板">
+                        <FontIcon Glyph="&#xE711;" FontSize="15" />
+                    </Button>
+                </StackPanel>
+                <TextBlock x:Name="SelectionInfo" Grid.Column="1" Style="{StaticResource StatusTextStyle}"
+                           Margin="16,0,0,0" Text="未选中" />
+                <TextBlock x:Name="TimeReadout" Grid.Column="2" Style="{StaticResource StatusTextStyle}"
+                           Margin="18,0,0,0" Text="0.00s / 0.00s" />
+                <TextBlock x:Name="BeatReadout" Grid.Column="3" Style="{StaticResource StatusTextStyle}"
                            Margin="18,0,0,0" Text="拍 0.00" />
-                <Slider x:Name="Scrubber" Grid.Column="2" Margin="24,0,24,0" VerticalAlignment="Center"
+                <Slider x:Name="Scrubber" Grid.Column="4" Margin="24,0,24,0" VerticalAlignment="Center"
                         Minimum="0" Maximum="1" StepFrequency="0.001" />
-                <TextBlock x:Name="BpmReadout" Grid.Column="3" Style="{StaticResource StatusTextStyle}"
+                <TextBlock x:Name="BpmReadout" Grid.Column="5" Style="{StaticResource StatusTextStyle}"
                            Text="120 BPM" />
-                <TextBlock x:Name="StatusReadout" Grid.Column="4" Style="{StaticResource StatusTextStyle}"
+                <TextBlock x:Name="StatusReadout" Grid.Column="6" Style="{StaticResource StatusTextStyle}"
                            Margin="18,0,0,0" Text="就绪" />
             </Grid>
         </Border>

@@ -34,12 +34,21 @@ public sealed class NoteSurface : UserControl
     private ChartEditor? _editor;
 
     private Note? _dragNote;
-    private Beat _dragOriginBeat;
-    private double _dragOriginX;
-    private double _dragOriginY;
     private double _pressX;
     private double _pressY;
     private bool _dragMoved;
+
+    /// <summary>拖动开始时整组选中项的原始状态，用于生成单次撤销记录。</summary>
+    private readonly List<DragOrigin> _dragOrigins = new();
+
+    private readonly record struct DragOrigin(Note Note, double Beat, double End, double X);
+
+    private bool _marquee;
+    private double _marqueeStartX;
+    private double _marqueeStartY;
+    private double _marqueeCurrentX;
+    private double _marqueeCurrentY;
+    private bool _marqueeAppend;
 
     public NoteSurface()
     {
@@ -51,7 +60,6 @@ public sealed class NoteSurface : UserControl
         _canvas.PointerReleased += OnPointerReleased;
         _canvas.PointerCanceled += OnPointerReleased;
         _canvas.PointerCaptureLost += (_, _) => EndDrag();
-        _canvas.PointerWheelChanged += OnPointerWheelChanged;
         _canvas.IsTabStop = true;
     }
 
@@ -121,6 +129,7 @@ public sealed class NoteSurface : UserControl
         DrawVerticalGrid(drawing, session, viewport, width, playheadY);
         DrawTimeGrid(drawing, session, viewport, width, playheadY);
         DrawNotes(drawing, session, viewport, width, height);
+        DrawMarquee(drawing);
         DrawPlayhead(drawing, viewport, width, playheadY);
     }
 
@@ -190,6 +199,21 @@ public sealed class NoteSurface : UserControl
     }
 
     /// <summary>判定线（播放头）：固定在画布底部的粗灰线，压在所有内容之上。</summary>
+    /// <summary>框选区域（橡皮筋）。</summary>
+    private void DrawMarquee(CanvasDrawingSession drawing)
+    {
+        if (!_marquee)
+        {
+            return;
+        }
+
+        var left = Math.Min(_marqueeStartX, _marqueeCurrentX);
+        var top = Math.Min(_marqueeStartY, _marqueeCurrentY);
+        var rect = new Rect(left, top, Math.Abs(_marqueeCurrentX - _marqueeStartX), Math.Abs(_marqueeCurrentY - _marqueeStartY));
+        drawing.FillRectangle(rect, EditorPalette.WithAlpha(Palette.MarqueeFill, 40).ToWinColor());
+        drawing.DrawRectangle(rect, Palette.MarqueeStroke.ToWinColor(), 1f);
+    }
+
     private void DrawPlayhead(CanvasDrawingSession drawing, EditViewport viewport, double width, double playheadY)
     {
         var color = EditorPalette.WithAlpha(Palette.Judgement, Palette.JudgementAlpha).ToWinColor();
@@ -258,9 +282,26 @@ public sealed class NoteSurface : UserControl
         _pressX = position.X;
         _pressY = position.Y;
 
+        var ctrl = e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Control);
+        var shift = e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Shift);
         var hit = HitTestNote(position.X, position.Y);
+
         if (hit is not null)
         {
+            if (ctrl)
+            {
+                // Ctrl+单击：加选 / 取消加选，不进入拖动。
+                if (!_session.SelectedNotes.Remove(hit))
+                {
+                    _session.SelectedNotes.Add(hit);
+                }
+
+                SelectionChanged?.Invoke(this, EventArgs.Empty);
+                Invalidate();
+                e.Handled = true;
+                return;
+            }
+
             if (!_session.SelectedNotes.Contains(hit))
             {
                 _session.SelectedNotes.Clear();
@@ -269,21 +310,56 @@ public sealed class NoteSurface : UserControl
             }
 
             _dragNote = hit;
-            _dragOriginBeat = hit.StartBeat;
-            _dragOriginX = hit.PositionX;
-            _dragOriginY = hit.PositionY;
             _dragMoved = false;
+            CaptureDragOrigins();
             _canvas.CapturePointer(e.Pointer);
         }
-        else
+        else if (_session.Tool is not null && !shift && !ctrl)
         {
+            // 放置音符：先清空选择。
             _session.SelectedNotes.Clear();
             SelectionChanged?.Invoke(this, EventArgs.Empty);
             PlaceNote(position.X, position.Y);
         }
+        else
+        {
+            // 空白处：框选（Shift 为追加模式）。
+            _marquee = true;
+            _marqueeAppend = shift;
+            _marqueeStartX = _marqueeCurrentX = position.X;
+            _marqueeStartY = _marqueeCurrentY = position.Y;
+            if (!shift)
+            {
+                _session.SelectedNotes.Clear();
+                SelectionChanged?.Invoke(this, EventArgs.Empty);
+            }
+
+            _canvas.CapturePointer(e.Pointer);
+        }
 
         Invalidate();
         e.Handled = true;
+    }
+
+    /// <summary>记录整组选中项的原始状态。</summary>
+    private void CaptureDragOrigins()
+    {
+        _dragOrigins.Clear();
+        foreach (var note in _session.SelectedNotes)
+        {
+            _dragOrigins.Add(new DragOrigin(note, note.StartBeat.Value, note.EndBeat.Value, note.PositionX));
+        }
+    }
+
+    /// <summary>把一组状态写回音符。</summary>
+    private static void ApplyStates(IEnumerable<DragOrigin> states)
+    {
+        foreach (var state in states)
+        {
+            state.Note.StartBeat = Beat.FromValue(state.Beat);
+            state.Note.EndBeat = Beat.FromValue(state.End);
+            state.Note.PositionX = state.X;
+        }
     }
 
     private void PlaceNote(double x, double y)
@@ -308,7 +384,7 @@ public sealed class NoteSurface : UserControl
             stageX = _session.Grid.Snap(stageX);
         }
 
-        var note = _editor.PlaceNote(_session.CurrentLine, _session.Tool, Beat.FromValue(beat), stageX);
+        var note = _editor.PlaceNote(_session.CurrentLine, _session.Tool!.Value, Beat.FromValue(beat), stageX);
         _session.SelectedNotes.Clear();
         _session.SelectedNotes.Add(note);
         SelectionChanged?.Invoke(this, EventArgs.Empty);
@@ -317,7 +393,7 @@ public sealed class NoteSurface : UserControl
 
     private void OnPointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (_dragNote is null || _session is null)
+        if (_session is null)
         {
             return;
         }
@@ -329,6 +405,20 @@ public sealed class NoteSurface : UserControl
         }
 
         var position = point.Position;
+
+        if (_marquee)
+        {
+            _marqueeCurrentX = position.X;
+            _marqueeCurrentY = position.Y;
+            Invalidate();
+            e.Handled = true;
+            return;
+        }
+
+        if (_dragNote is null)
+        {
+            return;
+        }
 
         // 位移小于阈值时仍算「点击选中」，不触发拖动。
         if (!_dragMoved &&
@@ -354,11 +444,29 @@ public sealed class NoteSurface : UserControl
         }
 
         _dragMoved = true;
-        _dragNote.StartBeat = Beat.FromValue(beat);
-        _dragNote.PositionX = stageX;
-        _dragNote.PositionY = _dragOriginY;
+        MoveDragged(beat, stageX);
         Invalidate();
         e.Handled = true;
+    }
+
+    /// <summary>按目标拍与横坐标移动整组选中项。</summary>
+    private void MoveDragged(double beat, double stageX)
+    {
+        if (_dragOrigins.Count == 0 || _dragNote is null)
+        {
+            return;
+        }
+
+        var origin = _dragOrigins[0];
+        var deltaBeat = beat - origin.Beat;
+        var deltaX = stageX - origin.X;
+
+        foreach (var state in _dragOrigins)
+        {
+            state.Note.StartBeat = Beat.FromValue(state.Beat + deltaBeat);
+            state.Note.EndBeat = Beat.FromValue(state.End + deltaBeat);
+            state.Note.PositionX = state.X + deltaX;
+        }
     }
 
     private void OnPointerReleased(object sender, PointerRoutedEventArgs e)
@@ -369,48 +477,68 @@ public sealed class NoteSurface : UserControl
 
     private void EndDrag()
     {
+        if (_marquee)
+        {
+            ApplyMarqueeSelection();
+            _marquee = false;
+            Invalidate();
+            return;
+        }
+
         var note = _dragNote;
         _dragNote = null;
-        if (note is null || !_dragMoved || _session is null)
+        if (note is null || !_dragMoved || _session is null || _dragOrigins.Count == 0)
         {
             return;
         }
 
-        var editor = _editor;
-        var originBeat = _dragOriginBeat;
-        var originX = _dragOriginX;
-        var originY = _dragOriginY;
-        var finalBeat = note.StartBeat;
-        var finalX = note.PositionX;
-        var finalY = note.PositionY;
-        var finalEnd = note.EndBeat;
+        // 记录拖动后的状态，再还原为起点，由撤销栈形成单次撤销记录。
+        var finals = _dragOrigins
+            .Select(state => new DragOrigin(state.Note, state.Note.StartBeat.Value, state.Note.EndBeat.Value, state.Note.PositionX))
+            .ToList();
+        var origins = _dragOrigins.ToList();
+        ApplyStates(origins);
 
-        // 先回到起点，再由撤销栈重新应用，形成单次撤销记录。
-        note.StartBeat = originBeat;
-        note.EndBeat = Beat.FromValue(originBeat.Value);
-        note.PositionX = originX;
-        note.PositionY = originY;
-
-        editor?.Undo.Push(new DelegateAction(
-            "移动音符",
-            () =>
-            {
-                note.StartBeat = finalBeat;
-                note.EndBeat = finalEnd;
-                note.PositionX = finalX;
-                note.PositionY = finalY;
-            },
-            () =>
-            {
-                note.StartBeat = originBeat;
-                note.EndBeat = Beat.FromValue(originBeat.Value);
-                note.PositionX = originX;
-                note.PositionY = originY;
-            }));
+        _editor?.Undo.Push(new DelegateAction(
+            $"移动 {origins.Count} 个音符",
+            () => ApplyStates(finals),
+            () => ApplyStates(origins)));
 
         _session.Document.IsDirty = true;
         SelectionChanged?.Invoke(this, EventArgs.Empty);
         Invalidate();
+    }
+
+    /// <summary>按框选区域确定选中的音符。</summary>
+    private void ApplyMarqueeSelection()
+    {
+        if (_session?.CurrentLine is null)
+        {
+            return;
+        }
+
+        var viewport = _session.Viewport;
+        var left = Math.Min(_marqueeStartX, _marqueeCurrentX);
+        var right = Math.Max(_marqueeStartX, _marqueeCurrentX);
+        var top = Math.Min(_marqueeStartY, _marqueeCurrentY);
+        var bottom = Math.Max(_marqueeStartY, _marqueeCurrentY);
+
+        if (!_marqueeAppend)
+        {
+            _session.SelectedNotes.Clear();
+        }
+
+        foreach (var note in _session.CurrentLine.Notes)
+        {
+            var x = viewport.StageXToPixel(note.PositionX);
+            var y = viewport.YAtBeat(note.StartBeat.Value);
+            if (x >= left && x <= right && y >= top && y <= bottom)
+            {
+                _session.SelectedNotes.Add(note);
+            }
+        }
+
+        SelectionChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private Note? HitTestNote(double x, double y)
@@ -436,32 +564,4 @@ public sealed class NoteSurface : UserControl
         return null;
     }
 
-    private void OnPointerWheelChanged(object sender, PointerRoutedEventArgs e)
-    {
-        if (_session is null)
-        {
-            return;
-        }
-
-        var delta = e.GetCurrentPoint(_canvas).Properties.MouseWheelDelta;
-        if (delta == 0)
-        {
-            return;
-        }
-
-        var position = e.GetCurrentPoint(_canvas).Position;
-        var viewport = _session.Viewport;
-        if (e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Control))
-        {
-            viewport.ZoomAt(position.Y, delta > 0 ? 1.15 : 1 / 1.15);
-        }
-        else
-        {
-            // 向下滚动 = 内容向下移动 = 看到更晚的拍。
-            viewport.ScrollByPixels(-delta * 0.6);
-        }
-
-        Invalidate();
-        e.Handled = true;
-    }
 }

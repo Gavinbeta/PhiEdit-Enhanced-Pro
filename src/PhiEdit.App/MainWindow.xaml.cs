@@ -10,6 +10,8 @@ using PhiEdit.Core.Editing;
 using PhiEdit.Core.IO;
 using PhiEdit.Core.Playback;
 using PhiEdit.Core.Rendering;
+using Windows.Foundation;
+using Windows.Graphics;
 using Windows.Storage;
 using Windows.Storage.Pickers;
 using Windows.System;
@@ -66,6 +68,10 @@ public sealed partial class MainWindow : Window
 
         RegisterShortcuts();
         RootLayout.KeyDown += OnRootKeyDown;
+
+        // 滚轮统一在窗口根节点处理：无论焦点在哪个控件，只要指针位于编辑区就应滚动时间轴。
+        RootLayout.PointerWheelChanged += OnRootPointerWheelChanged;
+        AttachAspectRatioLock();
 
         DivisionBox.Value = _session.Division;
         GridCountBox.Value = _session.GridCount;
@@ -134,6 +140,216 @@ public sealed partial class MainWindow : Window
         Add(Windows.System.VirtualKey.Z, Windows.System.VirtualKeyModifiers.Control, Undo);
         Add(Windows.System.VirtualKey.Y, Windows.System.VirtualKeyModifiers.Control, Redo);
         Add(Windows.System.VirtualKey.S, Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift, () => _ = ExportChart());
+        Add(Windows.System.VirtualKey.C, Windows.System.VirtualKeyModifiers.Control, CopySelection);
+        Add(Windows.System.VirtualKey.X, Windows.System.VirtualKeyModifiers.Control, CutSelection);
+        Add(Windows.System.VirtualKey.V, Windows.System.VirtualKeyModifiers.Control, PasteSelection);
+        Add(Windows.System.VirtualKey.M, Windows.System.VirtualKeyModifiers.Control, MirrorSelection);
+        Add(Windows.System.VirtualKey.A, Windows.System.VirtualKeyModifiers.Control, SelectAll);
+    }
+
+    // ---------------------------------------------------------------- 全局滚轮
+
+    /// <summary>
+    /// 窗口级滚轮处理：无论当前焦点在哪个控件，只要指针位于编辑区，滚轮都应滚动时间轴。
+    /// 向下滚动 = 拍号变小（与原版一致），Ctrl+滚轮 = 纵向缩放。
+    /// </summary>
+    private void OnRootPointerWheelChanged(object sender, PointerRoutedEventArgs e)
+    {
+        var point = e.GetCurrentPoint(RootLayout);
+        var delta = point.Properties.MouseWheelDelta;
+        if (delta == 0)
+        {
+            return;
+        }
+
+        var position = point.Position;
+        if (!IsOverEditorArea(position))
+        {
+            return;
+        }
+
+        var viewport = _session.Viewport;
+        if (e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Control))
+        {
+            viewport.ZoomAt(EditorLocalY(position), delta > 0 ? 1.15 : 1 / 1.15);
+        }
+        else
+        {
+            // 与原版一致：滚轮向下 = 拍号变小（回看更早的拍），一格滚动一个细分单位。
+            var step = 1.0 / Math.Max(1, _session.Division);
+            viewport.ScrollByBeats(delta > 0 ? step : -step);
+        }
+
+        e.Handled = true;
+    }
+
+    /// <summary>判断指针是否位于两个编辑区之内。</summary>
+    private bool IsOverEditorArea(Point position)
+    {
+        foreach (var surface in new FrameworkElement[] { NoteSurface, EventSurface })
+        {
+            var bounds = surface.TransformToVisual(RootLayout).TransformBounds(
+                new Rect(0, 0, surface.ActualWidth, surface.ActualHeight));
+            if (bounds.Contains(position))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>把窗口坐标转换为编辑区内部的纵坐标。</summary>
+    private double EditorLocalY(Point position)
+    {
+        var surface = NoteSurface;
+        var bounds = surface.TransformToVisual(RootLayout).TransformBounds(
+            new Rect(0, 0, surface.ActualWidth, surface.ActualHeight));
+        return bounds.Contains(position) ? position.Y - bounds.Top : 0;
+    }
+
+    // ---------------------------------------------------------------- 窗口比例
+
+    /// <summary>锁定主窗口为 16:9，避免调整大小时编辑区被右侧面板遮挡。</summary>
+    private void AttachAspectRatioLock()
+    {
+        try
+        {
+            var handle = WindowNative.GetWindowHandle(this);
+            var id = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(handle);
+            var appWindow = Microsoft.UI.Windowing.AppWindow.GetFromWindowId(id);
+            appWindow.Changed += OnAppWindowChanged;
+        }
+        catch (Exception)
+        {
+            // 窗口 API 不可用时保持默认行为。
+        }
+    }
+
+    private SizeInt32 _lastWindowSize;
+
+    private bool _adjustingSize;
+
+    private void OnAppWindowChanged(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowChangedEventArgs args)
+    {
+        if (_adjustingSize || !args.DidSizeChange)
+        {
+            return;
+        }
+
+        var size = sender.Size;
+        if (size.Width <= 0 || size.Height <= 0)
+        {
+            return;
+        }
+
+        const double ratio = 16.0 / 9.0;
+        var last = _lastWindowSize;
+        _lastWindowSize = size;
+        if (last.Width <= 0 || last.Height <= 0)
+        {
+            return;
+        }
+
+        // 以变化更明显的那条边为准，另一条边按 16:9 回推。
+        var widthChanged = Math.Abs(size.Width - last.Width) >= Math.Abs(size.Height - last.Height);
+        var targetWidth = widthChanged ? size.Width : (int)Math.Round(size.Height * ratio);
+        var targetHeight = widthChanged ? (int)Math.Round(size.Width / ratio) : size.Height;
+
+        try
+        {
+            var display = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(sender.Id,
+                Microsoft.UI.Windowing.DisplayAreaFallback.Nearest);
+            var work = display.WorkArea;
+            targetWidth = Math.Clamp(targetWidth, work.X + 900, work.X + work.Width);
+            targetHeight = Math.Clamp(targetHeight, work.Y + 560, work.Y + work.Height);
+        }
+        catch (Exception)
+        {
+            // 取不到工作区时直接使用推算值。
+        }
+
+        _adjustingSize = true;
+        sender.Resize(new SizeInt32(targetWidth, targetHeight));
+        _adjustingSize = false;
+    }
+
+    // ---------------------------------------------------------------- 剪贴板
+
+    private void OnCopyClick(object sender, RoutedEventArgs e) => CopySelection();
+
+    private void OnCutClick(object sender, RoutedEventArgs e) => CutSelection();
+
+    private void OnPasteClick(object sender, RoutedEventArgs e) => PasteSelection();
+
+    private void OnMirrorClick(object sender, RoutedEventArgs e) => MirrorSelection();
+
+    private void OnClearClipboardClick(object sender, RoutedEventArgs e)
+    {
+        _session.ClearClipboard();
+        RefreshSelectionInfo();
+        StatusReadout.Text = "剪贴板已清空";
+    }
+
+    private void OnDeleteSelectionClick(object sender, RoutedEventArgs e) => DeleteSelection();
+
+    private void CopySelection()
+    {
+        var count = _editor.CopySelection();
+        RefreshSelectionInfo();
+        StatusReadout.Text = count > 0 ? $"已复制 {count} 个对象" : "没有可复制的内容";
+    }
+
+    private void CutSelection()
+    {
+        var count = _editor.CutSelection();
+        RefreshSelectionInfo();
+        RefreshAll();
+        StatusReadout.Text = count > 0 ? $"已剪切 {count} 个对象" : "没有可剪切的内容";
+    }
+
+    private void PasteSelection()
+    {
+        var beat = _session.Viewport.Position;
+        var count = _editor.PasteSelection(beat);
+        RefreshAll();
+        StatusReadout.Text = count > 0 ? $"已粘贴 {count} 个对象" : "剪贴板为空";
+    }
+
+    private void MirrorSelection()
+    {
+        var count = _editor.MirrorSelection();
+        RefreshAll();
+        StatusReadout.Text = count > 0 ? $"已镜像 {count} 个对象" : "没有可镜像的内容";
+    }
+
+    /// <summary>全选当前判定线上的音符。</summary>
+    private void SelectAll()
+    {
+        var line = _session.CurrentLine;
+        if (line is null)
+        {
+            return;
+        }
+
+        _session.SelectedNotes.Clear();
+        foreach (var note in line.Notes)
+        {
+            _session.SelectedNotes.Add(note);
+        }
+
+        RefreshAll();
+        StatusReadout.Text = $"已选中 {_session.SelectedNotes.Count} 个音符";
+    }
+
+    /// <summary>更新底栏的选中信息。</summary>
+    private void RefreshSelectionInfo()
+    {
+        var notes = _session.SelectedNotes.Count;
+        var events = _session.SelectedEvents.Count;
+        SelectionInfo.Text = notes + events == 0
+            ? "未选中"
+            : $"已选 {notes} 音符 / {events} 事件";
     }
 
     // ---------------------------------------------------------------- 分栏
@@ -189,19 +405,14 @@ public sealed partial class MainWindow : Window
 
     private void ApplySplitWidths()
     {
-        var editorWidth = EditorArea.ActualWidth;
-        if (editorWidth > 0)
-        {
-            var usable = Math.Max(1, editorWidth - 6);
-            EditorArea.ColumnDefinitions[0].Width = new GridLength(usable * _editorSplitRatio);
-            EditorArea.ColumnDefinitions[1].Width = new GridLength(6);
-            EditorArea.ColumnDefinitions[2].Width = new GridLength(usable * (1 - _editorSplitRatio));
-        }
+        // 使用星号单位：窗口变窄时两个编辑区等比收缩，绝不会被右侧面板遮挡。
+        EditorArea.ColumnDefinitions[0].Width = new GridLength(_editorSplitRatio, GridUnitType.Star);
+        EditorArea.ColumnDefinitions[1].Width = new GridLength(6);
+        EditorArea.ColumnDefinitions[2].Width = new GridLength(1 - _editorSplitRatio, GridUnitType.Star);
 
-        var root = WorkspaceArea;
-        if (root.ColumnDefinitions.Count >= 3)
+        if (WorkspaceArea.ColumnDefinitions.Count >= 3)
         {
-            root.ColumnDefinitions[2].Width = new GridLength(_inspectorWidth);
+            WorkspaceArea.ColumnDefinitions[2].Width = new GridLength(_inspectorWidth);
         }
     }
 
@@ -228,6 +439,7 @@ public sealed partial class MainWindow : Window
 
     private void RefreshAll()
     {
+        RefreshSelectionInfo();
         RefreshLineSelector();
         RefreshLineList();
         RefreshBpmList();
@@ -300,6 +512,8 @@ public sealed partial class MainWindow : Window
 
     private void RefreshInspector()
     {
+        UpdateInspectorTab();
+
         var note = _session.SelectedNotes.FirstOrDefault();
         if (note is not null)
         {
@@ -404,13 +618,14 @@ public sealed partial class MainWindow : Window
         var tag = button.Tag as string ?? "select";
         if (tag == "select")
         {
-            _session.Tool = NoteType.Tap;
+            // 选择模式：不放置音符，空白处拖动即框选。
+            _session.Tool = null;
             SelectToolButton.IsChecked = true;
             TapToolButton.IsChecked = false;
             DragToolButton.IsChecked = false;
             FlickToolButton.IsChecked = false;
             HoldToolButton.IsChecked = false;
-            StatusReadout.Text = "工具：选择";
+            StatusReadout.Text = "工具：选择（框选 / 移动）";
             return;
         }
 
@@ -502,8 +717,8 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var tag = button.Tag as string ?? "notes";
-        foreach (var other in new[] { TabNotes, TabEvents, TabLines, TabChart })
+        var tag = button.Tag as string ?? "edit";
+        foreach (var other in new[] { TabEdit, TabLines, TabChart })
         {
             if (!ReferenceEquals(other, button))
             {
@@ -512,10 +727,75 @@ public sealed partial class MainWindow : Window
         }
 
         button.IsChecked = true;
-        NotesPanel.Visibility = tag == "notes" ? Visibility.Visible : Visibility.Collapsed;
-        EventsPanel.Visibility = tag == "events" ? Visibility.Visible : Visibility.Collapsed;
-        LinesPanel.Visibility = tag == "lines" ? Visibility.Visible : Visibility.Collapsed;
-        ChartPanel.Visibility = tag == "chart" ? Visibility.Visible : Visibility.Collapsed;
+        ShowInspectorTab(tag);
+    }
+
+    /// <summary>显示指定页签的内容。</summary>
+    private void ShowInspectorTab(string tag)
+    {
+        EditHintPanel.Visibility = Visibility.Collapsed;
+        NotesPanel.Visibility = Visibility.Collapsed;
+        EventsPanel.Visibility = Visibility.Collapsed;
+        LinesPanel.Visibility = Visibility.Collapsed;
+        ChartPanel.Visibility = Visibility.Collapsed;
+
+        switch (tag)
+        {
+            case "notes":
+                NotesPanel.Visibility = Visibility.Visible;
+                break;
+            case "events":
+                EventsPanel.Visibility = Visibility.Visible;
+                break;
+            case "lines":
+                LinesPanel.Visibility = Visibility.Visible;
+                break;
+            case "chart":
+                ChartPanel.Visibility = Visibility.Visible;
+                break;
+            default:
+                EditHintPanel.Visibility = Visibility.Visible;
+                break;
+        }
+    }
+
+    /// <summary>
+    /// 同步属性页签：未选中任何对象时页签显示「编辑」且不可选；
+    /// 选中音符时自动切到该页签并改名为「音符」；选中事件时改名为「事件」。
+    /// </summary>
+    private void UpdateInspectorTab()
+    {
+        var hasNote = _session.SelectedNotes.Count > 0;
+        var hasEvent = _session.SelectedEvents.Count > 0;
+
+        if (hasNote)
+        {
+            TabEdit.Content = "音符";
+            TabEdit.IsEnabled = true;
+            TabEdit.IsChecked = true;
+            TabLines.IsChecked = false;
+            TabChart.IsChecked = false;
+            ShowInspectorTab("notes");
+            return;
+        }
+
+        if (hasEvent)
+        {
+            TabEdit.Content = "事件";
+            TabEdit.IsEnabled = true;
+            TabEdit.IsChecked = true;
+            TabLines.IsChecked = false;
+            TabChart.IsChecked = false;
+            ShowInspectorTab("events");
+            return;
+        }
+
+        TabEdit.Content = "编辑";
+        TabEdit.IsEnabled = false;
+        if (TabEdit.IsChecked == true)
+        {
+            ShowInspectorTab("edit");
+        }
     }
 
     private void OnNoteTypeChanged(object sender, SelectionChangedEventArgs e)
@@ -652,7 +932,7 @@ public sealed partial class MainWindow : Window
                 e.Handled = true;
                 break;
             case VirtualKey.V:
-                SetTool(SelectToolButton, NoteType.Tap);
+                SetTool(SelectToolButton, null);
                 e.Handled = true;
                 break;
         }
@@ -661,7 +941,7 @@ public sealed partial class MainWindow : Window
     private static bool IsTextInputFocused() =>
         FocusManager.GetFocusedElement() is TextBox or ComboBox or Microsoft.UI.Xaml.Controls.NumberBox;
 
-    private void SetTool(ToggleButton button, NoteType type)
+    private void SetTool(ToggleButton button, NoteType? type)
     {
         _session.Tool = type;
         foreach (var other in new[] { SelectToolButton, TapToolButton, DragToolButton, FlickToolButton, HoldToolButton })
@@ -669,7 +949,7 @@ public sealed partial class MainWindow : Window
             other.IsChecked = ReferenceEquals(other, button);
         }
 
-        StatusReadout.Text = $"工具：{type}";
+        StatusReadout.Text = type is null ? "工具：选择（框选 / 移动）" : $"工具：{type}";
     }
 
     private void TogglePlay()
@@ -717,18 +997,16 @@ public sealed partial class MainWindow : Window
 
     private void DeleteSelection()
     {
-        if (_session.SelectedNotes.Count > 0)
+        var count = _session.SelectedNotes.Count + _session.SelectedEvents.Count;
+        if (count == 0)
         {
-            _editor.RemoveNotes(_session.SelectedNotes.ToList());
-            StatusReadout.Text = $"已删除 {_session.SelectedNotes.Count} 个音符";
-        }
-        else if (_session.SelectedEvents.Count > 0)
-        {
-            _editor.RemoveEvents(_session.SelectedEvents.ToList());
-            StatusReadout.Text = $"已删除 {_session.SelectedEvents.Count} 个事件";
+            StatusReadout.Text = "没有选中的对象";
+            return;
         }
 
+        _editor.DeleteSelection();
         RefreshAll();
+        StatusReadout.Text = $"已删除 {count} 个对象";
     }
 
     // ---------------------------------------------------------------- 文件

@@ -72,6 +72,9 @@ public sealed class NoteSurface : UserControl
     /// <summary>资源包贴图渲染器；为空时退回纯色绘制。</summary>
     public NoteSkinRenderer? Renderer { get; set; }
 
+    /// <summary>音符大小设置（原版 noteSize，默认 200）。</summary>
+    public double NoteSize { get; set; } = 200;
+
     /// <summary>用于加载资源包贴图的资源创建器。</summary>
     public ICanvasResourceCreator CanvasResourceCreator => _canvas;
 
@@ -290,6 +293,17 @@ public sealed class NoteSurface : UserControl
         drawing.DrawLine(0, (float)playheadY, (float)width, (float)playheadY, color, Palette.JudgementWidth);
     }
 
+    /// <summary>
+    /// 音符缩放：与原版一致，音符基准宽度随编辑区宽度与音符大小设置等比变化。
+    /// </summary>
+    private double NoteScale(double paneWidth) => NoteSize * paneWidth / 1350.0;
+
+    /// <summary>
+    /// 音符基准宽度（原版 noteBaseWidth = 68 × renderNoteScale × |size|，
+    /// 其中 renderNoteScale = noteSize × 画布宽 / (1350 × 68)）。
+    /// </summary>
+    private static double BaseWidth(double scale, Note note) => scale * Math.Abs(note.Size);
+
     private void DrawNotes(CanvasDrawingSession drawing, EditorSession session, EditViewport viewport, double width, double height)
     {
         var line = session.CurrentLine;
@@ -298,12 +312,13 @@ public sealed class NoteSurface : UserControl
             return;
         }
 
-        var noteWidth = NoteWidth(width);
-        const float noteHeight = 9f;
-
         var renderer = Renderer;
         var skin = renderer?.Skin;
         var textured = renderer is not null && renderer.IsReady;
+        var scale = NoteScale(width);
+
+        // 高亮 = 多押提示（与其它音符同时刻），与「选中」无关。
+        var simultaneous = session.Document.SimultaneousNotes();
 
         foreach (var note in line.Notes)
         {
@@ -315,48 +330,65 @@ public sealed class NoteSurface : UserControl
             }
 
             var x = (float)viewport.StageXToPixel(note.PositionX);
-            var color = Palette.NoteColor(note.Type).ToWinColor();
             var selected = session.SelectedNotes.Contains(note);
-            var highlighted = selected;
+            var highlighted = simultaneous.Contains(note);
+            var alpha = note.IsFake ? 0.45f : 1f;
 
-            if (textured && skin is not null && DrawTextured(drawing, renderer, skin, note, x, y, endY, noteWidth, noteHeight, highlighted))
+            if (textured && skin is not null &&
+                DrawTextured(drawing, renderer, skin, note, x, y, endY, scale, highlighted, alpha))
             {
                 if (selected)
                 {
-                    drawing.DrawRoundedRectangle(new Rect(x - noteWidth / 2 - 3, y - noteHeight / 2 - 3, noteWidth + 6, noteHeight + 6), 6, 6,
-                        Palette.Selection.ToWinColor(), 2f);
+                    // 选中白边：取消选中即消失。
+                    var baseWidth = BaseWidth(scale, note);
+                    var noteWidth = baseWidth * (highlighted ? skin.HighlightScale : 1);
+                    var texture = renderer["click.png"];
+                    var outline = Math.Max(6, noteWidth * (texture?.Size.Height ?? 8) /
+                        Math.Max(1, texture?.Size.Width ?? 1));
+                    drawing.DrawRoundedRectangle(
+                        new Rect(x - (float)noteWidth / 2 - 3, (float)y - (float)outline / 2 - 3,
+                            (float)noteWidth + 6, (float)outline + 6),
+                        6, 6, Palette.Selection.ToWinColor(), 2f);
                 }
 
                 continue;
             }
 
             // 无贴图时的纯色绘制。
+            var color = Palette.NoteColor(note.Type).ToWinColor();
+            var plainWidth = (float)BaseWidth(scale, note);
+            var plainHeight = 8f * (float)scale;
+
             if (note.Type == NoteType.Hold && Math.Abs(endY - y) > 0.5)
             {
                 var top = (float)Math.Min(y, endY);
                 var bodyHeight = (float)Math.Abs(endY - y);
-                drawing.FillRoundedRectangle(new Rect(x - noteWidth / 2, top, noteWidth, bodyHeight), 4, 4,
+                drawing.FillRoundedRectangle(new Rect(x - plainWidth / 2, top, plainWidth, bodyHeight), 4, 4,
                     EditorPalette.WithAlpha(Palette.NoteHold, 110).ToWinColor());
-                drawing.DrawRoundedRectangle(new Rect(x - noteWidth / 2, top, noteWidth, bodyHeight), 4, 4, color, 1.5f);
+                drawing.DrawRoundedRectangle(new Rect(x - plainWidth / 2, top, plainWidth, bodyHeight), 4, 4, color, 1.5f);
             }
 
-            var headY = (float)y - noteHeight / 2;
-            drawing.FillRoundedRectangle(new Rect(x - noteWidth / 2, headY, noteWidth, noteHeight), 4, 4, color);
+            var headY = (float)y - plainHeight / 2;
+            drawing.FillRoundedRectangle(new Rect(x - plainWidth / 2, headY, plainWidth, plainHeight), 4, 4, color);
             if (selected)
             {
-                drawing.DrawRoundedRectangle(new Rect(x - noteWidth / 2 - 3, headY - 3, noteWidth + 6, noteHeight + 6), 6, 6,
+                drawing.DrawRoundedRectangle(new Rect(x - plainWidth / 2 - 3, headY - 3, plainWidth + 6, plainHeight + 6), 6, 6,
                     Palette.Selection.ToWinColor(), 2f);
             }
+
         }
     }
 
     /// <summary>使用资源包贴图绘制音符；缺少贴图时返回 false 以退回纯色绘制。</summary>
     private static bool DrawTextured(CanvasDrawingSession drawing, NoteSkinRenderer renderer, NoteSkin skin,
-        Note note, float x, double y, double endY, double noteWidth, float noteHeight, bool highlighted)
+        Note note, float x, double y, double endY, double scale, bool highlighted, float opacity)
     {
+        var baseWidth = BaseWidth(scale, note);
+        var noteWidth = baseWidth * (highlighted ? skin.HighlightScale : 1);
+
         if (note.Type == NoteType.Hold)
         {
-            return DrawHoldTextured(drawing, renderer, skin, x, y, endY, noteWidth, highlighted);
+            return DrawHoldTextured(drawing, renderer, skin, x, y, endY, noteWidth, highlighted, opacity);
         }
 
         var name = note.Type switch
@@ -372,16 +404,21 @@ public sealed class NoteSurface : UserControl
             return false;
         }
 
-        var half = (float)noteWidth / 2;
+        // 高度按贴图宽高比推导，保持资源包的原始比例。
+        var height = noteWidth * bitmap.Size.Height / Math.Max(1, bitmap.Size.Width);
         drawing.DrawImage(bitmap,
-            new Rect(x - half, y - noteHeight / 2, (float)noteWidth, noteHeight),
-            new Rect(0, 0, bitmap.Size.Width, bitmap.Size.Height));
+            new Rect(x - (float)noteWidth / 2, (float)y - (float)height / 2, (float)noteWidth, (float)height),
+            new Rect(0, 0, bitmap.Size.Width, bitmap.Size.Height),
+            opacity);
         return true;
     }
 
-    /// <summary>绘制 Hold 音符：头部贴图 + 可拉伸的身体 + 尾部贴图。</summary>
+    /// <summary>
+    /// 绘制 Hold 音符：按 holdAtlas 拆成头部、身体、尾部三段。
+    /// 源图自上而下为「尾部 → 头部 → 身体」，与原版 note-skin.mjs 一致。
+    /// </summary>
     private static bool DrawHoldTextured(CanvasDrawingSession drawing, NoteSkinRenderer renderer, NoteSkin skin,
-        float x, double y, double endY, double noteWidth, bool highlighted)
+        float x, double y, double endY, double noteWidth, bool highlighted, float opacity)
     {
         var name = highlighted ? "hold_mh.png" : "hold.png";
         var bitmap = renderer[name];
@@ -394,47 +431,48 @@ public sealed class NoteSurface : UserControl
         var tailPixels = atlas[0];
         var headPixels = atlas[1];
         var imageHeight = bitmap.Size.Height;
-        var bodyPixels = Math.Max(0, imageHeight - tailPixels - headPixels);
+        var bodyPixels = imageHeight - tailPixels - headPixels;
         if (bodyPixels <= 0)
         {
             return false;
         }
 
-        // 时间自下而上流逝：起点（头）在下方，终点（尾）在上方。
+        // 时间自下而上流逝：起点（头部）在下方，终点（尾部）在上方。
         var headY = Math.Max(y, endY);
         var tailY = Math.Min(y, endY);
-        var scale = noteWidth / bitmap.Size.Width;
-        var headHeight = (float)(headPixels * scale);
-        var tailHeight = (float)(tailPixels * scale);
+        var textureScale = noteWidth / bitmap.Size.Width;
+        var headHeight = headPixels * textureScale;
+        var tailHeight = tailPixels * textureScale;
         var half = (float)noteWidth / 2;
 
-        // 身体：横向平铺，纵向拉伸到两段之间。
-        var bodyTop = headY - headHeight;
-        var bodyHeight = Math.Max(0, bodyTop - tailY - tailHeight);
-        if (bodyHeight > 0)
+        // 身体：头部上方到尾部下方之间。
+        var bodyTop = tailY + tailHeight;
+        var bodyBottom = headY - headHeight;
+        if (bodyBottom > bodyTop)
         {
             drawing.DrawImage(bitmap,
-                new Rect(x - half, bodyTop, (float)noteWidth, bodyHeight),
-                new Rect(0, tailPixels + headPixels, bitmap.Size.Width, bodyPixels));
+                new Rect(x - half, (float)bodyTop, (float)noteWidth, (float)(bodyBottom - bodyTop)),
+                new Rect(0, tailPixels, bitmap.Size.Width, bodyPixels),
+                opacity);
         }
 
-        // 头部贴图（位于起点）。
+        // 头部贴图：源图底部的一整段。
         drawing.DrawImage(bitmap,
-            new Rect(x - half, headY - headHeight, (float)noteWidth, headHeight),
-            new Rect(0, tailPixels, bitmap.Size.Width, headPixels));
+            new Rect(x - half, (float)(headY - headHeight), (float)noteWidth, (float)headHeight),
+            new Rect(0, imageHeight - headPixels, bitmap.Size.Width, headPixels),
+            opacity);
 
-        // 尾部贴图（位于终点）。
+        // 尾部贴图：源图顶部的一整段。
         if (tailHeight > 0)
         {
             drawing.DrawImage(bitmap,
-                new Rect(x - half, tailY, (float)noteWidth, tailHeight),
-                new Rect(0, 0, bitmap.Size.Width, tailPixels));
+                new Rect(x - half, (float)tailY, (float)noteWidth, (float)tailHeight),
+                new Rect(0, 0, bitmap.Size.Width, tailPixels),
+                opacity);
         }
 
         return true;
     }
-
-    private static double NoteWidth(double paneWidth) => Math.Max(28, Math.Min(96, paneWidth * 0.12));
 
     private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
     {
@@ -474,12 +512,18 @@ public sealed class NoteSurface : UserControl
                 return;
             }
 
-            if (!_session.SelectedNotes.Contains(hit))
+            // 无论该音符此前是否已被选中，点击音符都要先取消事件选择，
+            // 否则会残留「音符与事件同时被选中」的状态。
+            if (_session.SelectedNotes.Contains(hit))
             {
-                // 选择音符时先取消事件选择，两类对象的选择互斥。
-                _session.SelectNote(hit);
-                SelectionChanged?.Invoke(this, EventArgs.Empty);
+                _session.SelectedEvents.Clear();
             }
+            else
+            {
+                _session.SelectNote(hit);
+            }
+
+            SelectionChanged?.Invoke(this, EventArgs.Empty);
 
             _dragNote = hit;
             _dragMoved = false;
@@ -488,8 +532,9 @@ public sealed class NoteSurface : UserControl
         }
         else if (_session.Tool is not null && !shift && !ctrl)
         {
-            // 放置音符：先清空选择。
+            // 放置音符：先清空全部选择（含事件）。
             _session.SelectedNotes.Clear();
+            _session.SelectedEvents.Clear();
             SelectionChanged?.Invoke(this, EventArgs.Empty);
             PlaceNote(position.X, position.Y);
         }
@@ -503,6 +548,7 @@ public sealed class NoteSurface : UserControl
             if (!shift)
             {
                 _session.SelectedNotes.Clear();
+                _session.SelectedEvents.Clear();
                 SelectionChanged?.Invoke(this, EventArgs.Empty);
             }
 
@@ -721,12 +767,13 @@ public sealed class NoteSurface : UserControl
         }
 
         var viewport = _session.Viewport;
-        var noteWidth = NoteWidth(_canvas.ActualWidth);
+        var scale = NoteScale(_canvas.ActualWidth);
 
         foreach (var note in _session.CurrentLine.Notes)
         {
             var noteY = viewport.YAtBeat(note.StartBeat.Value);
             var noteX = viewport.StageXToPixel(note.PositionX);
+            var noteWidth = BaseWidth(scale, note);
             if (Math.Abs(noteY - y) <= 9 && Math.Abs(noteX - x) <= noteWidth / 2 + 2)
             {
                 return note;

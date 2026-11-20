@@ -221,11 +221,13 @@
                             </StackPanel>
                             <StackPanel Spacing="6">
                                 <TextBlock Text="起始拍" Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox x:Name="EventStartBeatBox" IsReadOnly="True" />
+                                <TextBox x:Name="EventStartBeatBox" PlaceholderText="整数:分子/分母"
+                                         LostFocus="OnEventBeatEdited" />
                             </StackPanel>
                             <StackPanel Spacing="6">
                                 <TextBlock Text="结束拍" Style="{StaticResource FieldLabelStyle}" />
-                                <TextBox x:Name="EventEndBeatBox" IsReadOnly="True" />
+                                <TextBox x:Name="EventEndBeatBox" PlaceholderText="整数:分子/分母"
+                                         LostFocus="OnEventBeatEdited" />
                             </StackPanel>
                             <StackPanel Spacing="6">
                                 <TextBlock Text="起始值" Style="{StaticResource FieldLabelStyle}" />
@@ -236,6 +238,16 @@
                                 <TextBlock Text="结束值" Style="{StaticResource FieldLabelStyle}" />
                                 <NumberBox x:Name="EventEndValueBox" SpinButtonPlacementMode="Compact"
                                            ValueChanged="OnEventValueChanged" />
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="缓动类型" Style="{StaticResource FieldLabelStyle}" />
+                                <ComboBox x:Name="EventEasingBox" HorizontalAlignment="Stretch"
+                                          SelectionChanged="OnEventEasingChanged" />
+                            </StackPanel>
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="绑定组" Style="{StaticResource FieldLabelStyle}" />
+                                <NumberBox x:Name="EventLinkGroupBox" SpinButtonPlacementMode="Compact"
+                                           ValueChanged="OnEventLinkGroupChanged" />
                             </StackPanel>
                             <Button x:Name="DeleteEventButton" Content="删除事件" HorizontalAlignment="Stretch"
                                     Style="{StaticResource AccentButtonStyle}" Click="OnDeleteEventClick" />

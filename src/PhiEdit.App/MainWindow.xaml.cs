@@ -78,6 +78,11 @@ public sealed partial class MainWindow : Window
         RootLayout.PointerWheelChanged += OnRootPointerWheelChanged;
         AttachAspectRatioLock();
 
+        for (var index = 0; index < PhiEdit.Core.Easing.Easing.Count; index++)
+        {
+            EventEasingBox.Items.Add($"{index + 1} · {PhiEdit.Core.Easing.Easing.DisplayName(index + 1)}");
+        }
+
         DivisionBox.Value = _session.Division;
         GridCountBox.Value = _session.GridCount;
         SnapToggle.IsOn = _session.SnapX;
@@ -110,6 +115,8 @@ public sealed partial class MainWindow : Window
         {
             (NoteType.Tap, 4.0, -420.0),
             (NoteType.Tap, 4.25, -135.0),
+            // 同一时刻的两个音符 = 多押，其中一个会以高亮贴图提示
+            (NoteType.Tap, 4.5, -270.0),
             (NoteType.Flick, 4.5, 90.0),
             (NoteType.Drag, 5.0, 300.0),
             (NoteType.Tap, 5.5, -675.0),
@@ -120,12 +127,12 @@ public sealed partial class MainWindow : Window
             editor.PlaceNote(line, type, Beat.FromValue(beat), x);
         }
 
-        editor.AddEvent(line, EventTrackKind.X, 0, Beat.FromValue(0), 0);
-        editor.AddEvent(line, EventTrackKind.X, 0, Beat.FromValue(4), -120, 60);
-        editor.AddEvent(line, EventTrackKind.Y, 0, Beat.FromValue(2), 0, 40);
-        editor.AddEvent(line, EventTrackKind.Rotate, 0, Beat.FromValue(0), 0);
-        editor.AddEvent(line, EventTrackKind.Alpha, 0, Beat.FromValue(0), 1);
-        editor.AddEvent(line, EventTrackKind.Speed, 0, Beat.FromValue(0), 1);
+        // 起点 4:1/2、终点 5:1/2 的事件应绘制成覆盖整段的长条
+        editor.AddEvent(line, EventTrackKind.X, 0, Beat.FromValue(4.5), -120, 60, Beat.FromValue(5.5));
+        editor.AddEvent(line, EventTrackKind.Y, 0, Beat.FromValue(4.5), 0, 40, Beat.FromValue(5.5));
+        editor.AddEvent(line, EventTrackKind.Rotate, 0, Beat.FromValue(4.5), 0, 0, Beat.FromValue(5.5));
+        editor.AddEvent(line, EventTrackKind.Alpha, 0, Beat.FromValue(4.5), 1, 1, Beat.FromValue(5.5));
+        editor.AddEvent(line, EventTrackKind.Speed, 0, Beat.FromValue(4.5), 1, 1, Beat.FromValue(5.5));
 
         _session.Undo.Clear();
         document.IsDirty = false;
@@ -707,6 +714,8 @@ public sealed partial class MainWindow : Window
             EventEndBeatBox.Text = item.EndBeat.ToString();
             EventStartValueBox.Value = item.StartValue;
             EventEndValueBox.Value = item.EndValue;
+            EventEasingBox.SelectedIndex = Math.Clamp(item.Easing - 1, 0, PhiEdit.Core.Easing.Easing.Count - 1);
+            EventLinkGroupBox.Value = item.LinkedGroup;
         }
         else
         {
@@ -1004,6 +1013,67 @@ public sealed partial class MainWindow : Window
         note.PositionY = e.NewValue;
         _session.Document.IsDirty = true;
         NoteSurface.Invalidate();
+    }
+
+    /// <summary>编辑事件的起止拍。</summary>
+    private void OnEventBeatEdited(object sender, RoutedEventArgs e)
+    {
+        var item = _session.SelectedEvents.FirstOrDefault();
+        if (item is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(EventStartBeatBox.Text))
+            {
+                item.StartBeat = Beat.Parse(EventStartBeatBox.Text);
+            }
+
+            if (!string.IsNullOrWhiteSpace(EventEndBeatBox.Text))
+            {
+                item.EndBeat = Beat.Parse(EventEndBeatBox.Text);
+            }
+        }
+        catch (FormatException exception)
+        {
+            StatusReadout.Text = $"拍格式不正确：{exception.Message}";
+            RefreshInspector();
+            return;
+        }
+
+        _session.Document.IsDirty = true;
+        EventSurface.Invalidate();
+        StatusReadout.Text = "已更新事件时间";
+    }
+
+    /// <summary>编辑事件的缓动类型。</summary>
+    private void OnEventEasingChanged(object sender, SelectionChangedEventArgs e)
+    {
+        var item = _session.SelectedEvents.FirstOrDefault();
+        if (item is null || EventEasingBox.SelectedIndex < 0)
+        {
+            return;
+        }
+
+        item.Easing = EventEasingBox.SelectedIndex + 1;
+        _session.Document.IsDirty = true;
+        EventSurface.Invalidate();
+    }
+
+    /// <summary>编辑事件的绑定组。</summary>
+    private void OnEventLinkGroupChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
+    {
+        var item = _session.SelectedEvents.FirstOrDefault();
+        if (item is null || double.IsNaN(e.NewValue))
+        {
+            return;
+        }
+
+        item.LinkedGroup = (int)e.NewValue;
+        _session.Document.IsDirty = true;
+        EventSurface.Invalidate();
     }
 
     private void OnEventValueChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)

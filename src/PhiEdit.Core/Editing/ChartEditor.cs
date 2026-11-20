@@ -357,15 +357,19 @@ public sealed class ChartEditor
         _session.Document.IsDirty = true;
     }
 
-    /// <summary>在判定线上新建事件。</summary>
-    public LineEvent AddEvent(JudgeLine line, EventTrackKind kind, int layer, Beat startBeat, double startValue, double? endValue = null)
+    /// <summary>
+    /// 在判定线上新建事件。endBeat 省略时事件为零长度（瞬时事件）；
+    /// 给出 endBeat 则事件覆盖整段区间，在编辑区绘制为一条长条。
+    /// </summary>
+    public LineEvent AddEvent(JudgeLine line, EventTrackKind kind, int layer, Beat startBeat, double startValue,
+        double? endValue = null, Beat? endBeat = null)
     {
         var item = new LineEvent
         {
             Kind = kind,
             Layer = layer,
             StartBeat = startBeat,
-            EndBeat = startBeat,
+            EndBeat = endBeat ?? startBeat,
             StartValue = startValue,
             EndValue = endValue ?? startValue,
         };

@@ -63,10 +63,24 @@ public sealed class NoteSurface : UserControl
         get => _session;
         set
         {
+            if (_session is not null)
+            {
+                _session.Viewport.ViewChanged -= OnViewportViewChanged;
+            }
+
             _session = value;
+
+            if (_session is not null)
+            {
+                // 纵向位置是唯一真源：视口一变化，本区立即重绘。
+                _session.Viewport.ViewChanged += OnViewportViewChanged;
+            }
+
             Invalidate();
         }
     }
+
+    private void OnViewportViewChanged(object? sender, EventArgs e) => Invalidate();
 
     public ChartEditor? Editor
     {
@@ -76,9 +90,6 @@ public sealed class NoteSurface : UserControl
 
     /// <summary>交互导致数据变化时触发，供外部刷新属性面板。</summary>
     public event EventHandler? SelectionChanged;
-
-    /// <summary>视图滚动或缩放变化时触发（两个编辑区共用同一视口，需同时重绘）。</summary>
-    public event EventHandler? ViewChanged;
 
     /// <summary>请求重绘。</summary>
     public void Invalidate() => _canvas.Invalidate();
@@ -450,7 +461,6 @@ public sealed class NoteSurface : UserControl
             viewport.ScrollByPixels(-delta * 0.6);
         }
 
-        ViewChanged?.Invoke(this, EventArgs.Empty);
         Invalidate();
         e.Handled = true;
     }

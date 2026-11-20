@@ -7,13 +7,15 @@ public class ViewportTests
 {
     private static EditViewport Create(double height = 600, double inset = 26)
     {
-        return new EditViewport
+        var viewport = new EditViewport
         {
             ViewportHeight = height,
             PlayheadInset = inset,
             PixelsPerBeat = 100,
-            AnchorBeat = 4,
         };
+
+        viewport.SetPosition(4);
+        return viewport;
     }
 
     [Fact]
@@ -25,10 +27,10 @@ public class ViewportTests
     }
 
     [Fact]
-    public void AnchorBeatSitsOnThePlayheadLine()
+    public void PositionSitsOnThePlayheadLine()
     {
         var viewport = Create();
-        Assert.Equal(viewport.PlayheadY, viewport.YAtBeat(viewport.AnchorBeat), 6);
+        Assert.Equal(viewport.PlayheadY, viewport.YAtBeat(viewport.Position), 6);
     }
 
     [Fact]
@@ -51,6 +53,26 @@ public class ViewportTests
     }
 
     [Fact]
+    public void PositionIsTheSingleSourceOfTruth()
+    {
+        var viewport = Create();
+        var raised = 0;
+        viewport.ViewChanged += (_, _) => raised++;
+
+        viewport.SetPosition(6);
+        Assert.Equal(6, viewport.Position, 6);
+        Assert.Equal(1, raised);
+
+        // 同样的值不会重复触发
+        viewport.SetPosition(6);
+        Assert.Equal(1, raised);
+
+        // 缩放同样会广播
+        viewport.ZoomAt(0, 1.2);
+        Assert.Equal(2, raised);
+    }
+
+    [Fact]
     public void ScrollingNeverProducesNegativeBeats()
     {
         var viewport = Create();
@@ -59,9 +81,9 @@ public class ViewportTests
             viewport.ScrollByPixels(-1000);
         }
 
-        Assert.True(viewport.AnchorBeat >= 0);
+        Assert.True(viewport.Position >= 0);
         Assert.True(viewport.BottomBeat <= 0);   // 判定线以下的窄带允许为负，但不会被标注
-        Assert.Equal(0, viewport.AnchorBeat, 6);
+        Assert.Equal(0, viewport.Position, 6);
     }
 
     [Fact]
@@ -71,7 +93,7 @@ public class ViewportTests
         var before = viewport.YAtBeat(4);
         viewport.ScrollByPixels(50);
         Assert.True(viewport.YAtBeat(4) > before);     // 同一拍在屏幕上向下移动
-        Assert.True(viewport.AnchorBeat > 4);          // 锚点后移，判定线处是更晚的拍
+        Assert.True(viewport.Position > 4);          // 锚点后移，判定线处是更晚的拍
     }
 
     [Fact]
@@ -80,6 +102,6 @@ public class ViewportTests
         var viewport = Create();
         viewport.ScrollToBeat(0);
         viewport.ZoomAt(0, 0.5);
-        Assert.True(viewport.AnchorBeat >= 0);
+        Assert.True(viewport.Position >= 0);
     }
 }

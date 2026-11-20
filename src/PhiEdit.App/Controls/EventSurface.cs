@@ -66,10 +66,24 @@ public sealed class EventSurface : UserControl
         get => _session;
         set
         {
+            if (_session is not null)
+            {
+                _session.Viewport.ViewChanged -= OnViewportViewChanged;
+            }
+
             _session = value;
+
+            if (_session is not null)
+            {
+                // 纵向位置是唯一真源：视口一变化，本区立即重绘。
+                _session.Viewport.ViewChanged += OnViewportViewChanged;
+            }
+
             Invalidate();
         }
     }
+
+    private void OnViewportViewChanged(object? sender, EventArgs e) => Invalidate();
 
     public ChartEditor? Editor
     {
@@ -78,8 +92,6 @@ public sealed class EventSurface : UserControl
     }
 
     public event EventHandler? SelectionChanged;
-
-    public event EventHandler? ViewChanged;
 
     /// <summary>当前显示的事件轨道集合。</summary>
     public IReadOnlyList<EventTrackKind> Tracks { get; set; } = EventTrackKinds.Standard;
@@ -232,7 +244,7 @@ public sealed class EventSurface : UserControl
         drawing.FillRectangle(new Rect(0, top, (float)width, (float)FooterHeight), Palette.EventHeaderBackground.ToWinColor());
 
         var line = session.CurrentLine;
-        var beat = session.Viewport.AnchorBeat;
+        var beat = session.Viewport.Position;
         var format = CanvasExtensions.TextFormat(13f, center: true);
         for (var channel = 0; channel < Tracks.Count; channel++)
         {
@@ -482,7 +494,6 @@ public sealed class EventSurface : UserControl
             viewport.ScrollByPixels(-delta * 0.6);
         }
 
-        ViewChanged?.Invoke(this, EventArgs.Empty);
         Invalidate();
         e.Handled = true;
     }

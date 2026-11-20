@@ -443,8 +443,27 @@ public sealed class PreviewCanvas : UserControl
         LineRuntime runtime, LineState state, float centerX, float centerY, float scale)
     {
         var line = runtime.Line;
+        var isDefault = string.IsNullOrEmpty(line.Texture) || line.Texture == "line.png";
         var alpha = (float)Math.Clamp(state.Alpha / 255, 0, 1);
-        var tint = Rgb(state.Color);
+        double[] lineColor = state.Color;
+
+        // 参考 preview.mjs：资源包的 perfectColor 会覆盖默认判定线颜色，
+        // 其 alpha 也要乘进判定线透明度；有自定义贴图/文字/颜色事件时不覆盖。
+        var pack = _packRenderer.IsReady ? _packRenderer.Skin : null;
+        if (pack is not null && isDefault && !line.AttachUI &&
+            !runtime.HasTextEvents && !runtime.HasColorEvents)
+        {
+            var perfect = pack.Info.ColorPerfect;
+            lineColor = new[]
+            {
+                (double)((perfect >> 16) & 0xFF),
+                (double)((perfect >> 8) & 0xFF),
+                (double)(perfect & 0xFF),
+            };
+            alpha *= (float)((perfect >> 24) & 0xFF) / 255f;
+        }
+
+        var tint = Rgb(lineColor);
         if (alpha <= 0)
         {
             return;
@@ -456,7 +475,6 @@ public sealed class PreviewCanvas : UserControl
             return;
         }
 
-        var isDefault = string.IsNullOrEmpty(line.Texture) || line.Texture == "line.png";
         double width;
         double height;
         CanvasBitmap? bitmap;
@@ -488,7 +506,7 @@ public sealed class PreviewCanvas : UserControl
             return;
         }
 
-        DrawTinted(drawing, bitmap, destination, new Rect(0, 0, bitmap.Size.Width, bitmap.Size.Height), state.Color, alpha);
+        DrawTinted(drawing, bitmap, destination, new Rect(0, 0, bitmap.Size.Width, bitmap.Size.Height), lineColor, alpha);
     }
 
     private static void DrawLineText(CanvasDrawingSession drawing, string text, JudgeLine line,

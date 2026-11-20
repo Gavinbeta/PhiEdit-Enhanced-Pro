@@ -112,6 +112,10 @@ public sealed class LineRuntime
 
     public bool HasScaleYEvents => AllEvents(EventTrackKind.ScaleY).Any();
 
+    public bool HasColorEvents => AllEvents(EventTrackKind.Color).Any();
+
+    public bool HasTextEvents => AllEvents(EventTrackKind.Text).Any();
+
     public double Floor(double seconds) => _speeds.Sum(speed => speed.Distance(seconds));
 
     public LineState State(double seconds)

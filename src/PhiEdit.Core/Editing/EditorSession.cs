@@ -40,8 +40,8 @@ public sealed class EditorSession
     /// <summary>是否吸附到拍细分线。</summary>
     public bool SnapTime { get; set; } = true;
 
-    /// <summary>当前放置工具。</summary>
-    public NoteType Tool { get; set; } = NoteType.Tap;
+    /// <summary>当前放置工具；为 null 表示处于「选择」模式（框选 / 移动，不放置音符）。</summary>
+    public NoteType? Tool { get; set; } = NoteType.Tap;
 
     /// <summary>当前事件层。</summary>
     public int CurrentLayer { get; set; }
@@ -51,6 +51,15 @@ public sealed class EditorSession
 
     /// <summary>选中的事件。</summary>
     public HashSet<LineEvent> SelectedEvents { get; } = new();
+
+    /// <summary>剪贴板中的音符（连同所属判定线）。</summary>
+    public List<ClipboardNote> ClipboardNotes { get; } = new();
+
+    /// <summary>剪贴板中的事件（连同所属判定线与轨道）。</summary>
+    public List<ClipboardEvent> ClipboardEvents { get; } = new();
+
+    /// <summary>剪贴板中最早的拍，粘贴时以此为对齐基准。</summary>
+    public double ClipboardStartBeat { get; set; } = double.PositiveInfinity;
 
     public int CurrentLineIndex
     {
@@ -77,6 +86,14 @@ public sealed class EditorSession
     /// <summary>数据或选择发生变化时触发。</summary>
     public event EventHandler? Changed;
 
+    /// <summary>清空剪贴板。</summary>
+    public void ClearClipboard()
+    {
+        ClipboardNotes.Clear();
+        ClipboardEvents.Clear();
+        ClipboardStartBeat = double.PositiveInfinity;
+    }
+
     public void ClearSelection()
     {
         var had = SelectedNotes.Count > 0 || SelectedEvents.Count > 0;
@@ -89,4 +106,25 @@ public sealed class EditorSession
     }
 
     public void NotifyChanged() => Changed?.Invoke(this, EventArgs.Empty);
+}
+
+
+/// <summary>剪贴板中的音符条目。</summary>
+public sealed class ClipboardNote
+{
+    public required Note Note { get; init; }
+
+    public required int LineId { get; init; }
+}
+
+/// <summary>剪贴板中的事件条目。</summary>
+public sealed class ClipboardEvent
+{
+    public required LineEvent Event { get; init; }
+
+    public required EventTrackKind Kind { get; init; }
+
+    public required int Layer { get; init; }
+
+    public required int LineId { get; init; }
 }

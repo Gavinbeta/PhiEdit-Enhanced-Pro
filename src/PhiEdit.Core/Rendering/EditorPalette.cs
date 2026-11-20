@@ -21,17 +21,23 @@ public sealed class EditorPalette
     /// <summary>整拍线宽度（像素）。</summary>
     public float BeatLineWidth { get; set; } = 3f;
 
-    /// <summary>细分线颜色（黄）。</summary>
-    public Color Subdivision { get; set; } = Color.FromArgb(255, 255, 235, 59);
+    /// <summary>细分线颜色（绿）。</summary>
+    public Color Subdivision { get; set; } = Color.FromArgb(255, 74, 168, 78);
 
-    /// <summary>次级细分线颜色（黄，更淡）。</summary>
-    public Color MinorSubdivision { get; set; } = Color.FromArgb(255, 255, 235, 59);
+    /// <summary>次级细分线颜色（绿，更淡）。</summary>
+    public Color MinorSubdivision { get; set; } = Color.FromArgb(255, 74, 168, 78);
 
     /// <summary>细分线不透明度。</summary>
-    public byte SubdivisionAlpha { get; set; } = 135;
+    public byte SubdivisionAlpha { get; set; } = 150;
 
     /// <summary>次级细分线不透明度。</summary>
-    public byte MinorSubdivisionAlpha { get; set; } = 85;
+    public byte MinorSubdivisionAlpha { get; set; } = 95;
+
+    /// <summary>框选区域的填充色。</summary>
+    public Color MarqueeFill { get; set; } = Color.FromArgb(255, 129, 191, 255);
+
+    /// <summary>框选区域的边框色。</summary>
+    public Color MarqueeStroke { get; set; } = Color.FromArgb(255, 129, 191, 255);
 
     /// <summary>竖线颜色（黄）。</summary>
     public Color VerticalLine { get; set; } = Color.FromArgb(255, 255, 224, 64);

@@ -73,6 +73,9 @@ public sealed class EditViewport
     public void ScrollByPixels(double delta) =>
         SetPosition(_position + delta / Math.Max(1e-6, PixelsPerBeat));
 
+    /// <summary>按拍增量滚动。增量为负表示回到更早的拍。</summary>
+    public void ScrollByBeats(double beats) => SetPosition(_position + beats);
+
     /// <summary>把判定线定位到指定拍。</summary>
     public void ScrollToBeat(double beat) => SetPosition(beat);
 

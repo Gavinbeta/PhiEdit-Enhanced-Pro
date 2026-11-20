@@ -84,11 +84,11 @@ public static class EventTrackKinds
         EventTrackKind.Rotate => "旋转",
         EventTrackKind.Alpha => "透明度",
         EventTrackKind.Speed => "速度",
-        EventTrackKind.ScaleX => "X 缩放",
-        EventTrackKind.ScaleY => "Y 缩放",
+        EventTrackKind.ScaleX => "缩放 X",
+        EventTrackKind.ScaleY => "缩放 Y",
         EventTrackKind.Color => "颜色",
-        EventTrackKind.Paint => "绘制",
-        EventTrackKind.Text => "文本",
+        EventTrackKind.Paint => "着色器",
+        EventTrackKind.Text => "文字",
         _ => kind.ToString(),
     };
 

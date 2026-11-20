@@ -60,6 +60,14 @@ public sealed class EditorCanvas : UserControl
     private double _marqueeCurrentY;
     private bool _marqueeAppend;
 
+    private Point _lastPointerPosition;
+    private bool _holdPending;
+    private double _holdStartBeat;
+    private double _holdStageX;
+    private bool _eventPending;
+    private double _eventStartBeat;
+    private int _eventChannel;
+
     private readonly record struct NoteDragOrigin(Note Note, double Beat, double End, double X);
     private readonly record struct EventDragOrigin(LineEvent Event, double Start, double End, double StartValue, double EndValue);
 
@@ -87,6 +95,10 @@ public sealed class EditorCanvas : UserControl
     public ICanvasResourceCreator CanvasResourceCreator => _canvas;
 
     public IReadOnlyList<EventTrackKind> Tracks { get; set; } = EventTrackKinds.Standard;
+
+    /// <summary>特殊层显示扩展轨道，基础层显示五条标准轨道。</summary>
+    private IReadOnlyList<EventTrackKind> ActiveTracks =>
+        _session?.CurrentLayer == JudgeLine.SpecialLayer ? EventTrackKinds.Extended : Tracks;
 
     public event EventHandler<string>? SkinLoadFailed;
 
@@ -217,11 +229,13 @@ public sealed class EditorCanvas : UserControl
             layout.LeftWidth + GutterWidth / 2);
         DrawVerticalGrid(drawing, session.GridCount, 0, layout.LeftWidth, playheadY);
         DrawNotes(drawing, session, viewport, 0, layout.LeftWidth, height);
+        DrawPendingHold(drawing, session, viewport, 0, layout.LeftWidth, height);
 
         DrawTimeGrid(drawing, session, viewport, layout.RightLeft, layout.RightWidth, playheadY,
             width - 14);
         DrawVerticalGrid(drawing, 6, layout.RightLeft, layout.RightWidth, playheadY);
         DrawEvents(drawing, session, viewport, layout.RightLeft, layout.RightWidth, height);
+        DrawPendingEvent(drawing, session, viewport, layout.RightLeft, layout.RightWidth, height);
         DrawHeader(drawing, layout.RightLeft, layout.RightWidth);
 
         DrawPlayhead(drawing, 0, layout.LeftWidth, playheadY);
@@ -304,7 +318,7 @@ public sealed class EditorCanvas : UserControl
         var gridLeft = (float)(left + Palette.GridInsetX);
         var gridTop = (float)Palette.GridInsetTop;
         var gridBottom = (float)Math.Max(gridTop, playheadY - Palette.GridInsetBottom);
-        for (var index = 0; index <= Tracks.Count; index++)
+        for (var index = 0; index <= ActiveTracks.Count; index++)
         {
             var x = gridLeft + (float)(index * channelWidth);
             drawing.DrawLine(x, gridTop, x, gridBottom,
@@ -313,7 +327,7 @@ public sealed class EditorCanvas : UserControl
     }
 
     private double ChannelWidth(double width) =>
-        Math.Max(1, width - Palette.GridInsetX * 2) / Math.Max(1, Tracks.Count);
+        Math.Max(1, width - Palette.GridInsetX * 2) / Math.Max(1, ActiveTracks.Count);
 
     private void DrawHeader(CanvasDrawingSession drawing, double left, double width)
     {
@@ -323,9 +337,9 @@ public sealed class EditorCanvas : UserControl
             Palette.EventHeaderBackground.ToWinColor());
         var format = CanvasExtensions.TextFormat(16f, bold: true);
         var channelWidth = ChannelWidth(width);
-        for (var channel = 0; channel < Tracks.Count; channel++)
+        for (var channel = 0; channel < ActiveTracks.Count; channel++)
         {
-            drawing.DrawText(Tracks[channel].DisplayName(),
+            drawing.DrawText(ActiveTracks[channel].DisplayName(),
                 new Vector2(gridLeft + (float)(channel * channelWidth + 6), 4),
                 Palette.EventHeaderText.ToWinColor(), format);
         }
@@ -342,9 +356,9 @@ public sealed class EditorCanvas : UserControl
         var format = CanvasExtensions.TextFormat(24f, center: true, bold: true);
         var valueColor = Windows.UI.Color.FromArgb(255, 60, 230, 90);
 
-        for (var channel = 0; channel < Tracks.Count; channel++)
+        for (var channel = 0; channel < ActiveTracks.Count; channel++)
         {
-            var kind = Tracks[channel];
+            var kind = ActiveTracks[channel];
             var value = line is null ? 0 : CurrentValue(line, kind, session.CurrentLayer, beat);
             drawing.DrawText(value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
                 new Vector2((float)(gridLeft + channel * channelWidth + channelWidth / 2),
@@ -601,9 +615,9 @@ public sealed class EditorCanvas : UserControl
         var barWidth = Math.Max(6, channelWidth * 0.62);
         var gridLeft = left + Palette.GridInsetX;
 
-        for (var channel = 0; channel < Tracks.Count; channel++)
+        for (var channel = 0; channel < ActiveTracks.Count; channel++)
         {
-            var kind = Tracks[channel];
+            var kind = ActiveTracks[channel];
             var events = line.Track(kind, session.CurrentLayer);
             if (events.Count == 0)
             {
@@ -697,6 +711,7 @@ public sealed class EditorCanvas : UserControl
         }
 
         var point = e.GetCurrentPoint(_canvas).Position;
+        _lastPointerPosition = point;
         var layout = Layout(_canvas.ActualWidth);
         _pressX = point.X;
         _pressY = point.Y;
@@ -751,15 +766,6 @@ public sealed class EditorCanvas : UserControl
             _noteDragMoved = false;
             CaptureNoteOrigins();
             _canvas.CapturePointer(e.Pointer);
-            return;
-        }
-
-        if (_session.Tool is not null && !shift && !ctrl)
-        {
-            _session.SelectedNotes.Clear();
-            _session.SelectedEvents.Clear();
-            RaiseSelectionChanged();
-            PlaceNote(point.X, point.Y);
             return;
         }
 
@@ -860,6 +866,12 @@ public sealed class EditorCanvas : UserControl
         }
 
         var point = e.GetCurrentPoint(_canvas);
+        _lastPointerPosition = point.Position;
+        if (_holdPending || _eventPending)
+        {
+            Invalidate();
+        }
+
         if (!point.Properties.IsLeftButtonPressed)
         {
             return;
@@ -1062,7 +1074,7 @@ public sealed class EditorCanvas : UserControl
             var layout = Layout(_canvas.ActualWidth);
             var channelWidth = ChannelWidth(layout.RightWidth);
             var barWidth = Math.Max(6, channelWidth * 0.62);
-            for (var channel = 0; channel < Tracks.Count; channel++)
+            for (var channel = 0; channel < ActiveTracks.Count; channel++)
             {
                 var barX = layout.RightLeft + Palette.GridInsetX + channel * channelWidth + (channelWidth - barWidth) / 2;
                 if (barX + barWidth < left || barX > right)
@@ -1070,7 +1082,7 @@ public sealed class EditorCanvas : UserControl
                     continue;
                 }
 
-                foreach (var item in _session.CurrentLine.Track(Tracks[channel], _session.CurrentLayer))
+                foreach (var item in _session.CurrentLine.Track(ActiveTracks[channel], _session.CurrentLayer))
                 {
                     var eventTop = viewport.YAtBeat(item.EndBeat.Value);
                     var eventBottom = viewport.YAtBeat(item.StartBeat.Value);
@@ -1083,6 +1095,153 @@ public sealed class EditorCanvas : UserControl
         }
 
         RaiseSelectionChanged();
+    }
+
+    /// <summary>Q/W/E：在当前指针位置放置瞬时音符。</summary>
+    public string PlaceNoteAtPointer(NoteType type)
+    {
+        if (_session?.CurrentLine is null || _editor is null)
+        {
+            return "没有可编辑的判定线";
+        }
+
+        var leftWidth = Layout(_canvas.ActualWidth).LeftWidth;
+        if (_lastPointerPosition.X > leftWidth)
+        {
+            return "指针不在音符区";
+        }
+
+        var viewport = _session.Viewport;
+        var beat = SnapBeat(viewport.BeatAtY(_lastPointerPosition.Y));
+        var stageX = SnapX(viewport.PixelToStageX(ClampNotePixel(_lastPointerPosition.X, leftWidth) - Palette.GridInsetX));
+        var note = _editor.PlaceNote(_session.CurrentLine, type, Beat.FromValue(beat), stageX);
+        _session.SelectedNotes.Clear();
+        _session.SelectedNotes.Add(note);
+        RaiseSelectionChanged();
+        return $"已放置 {type}";
+    }
+
+    /// <summary>R：音符区两段式放置 Hold，判定线区两段式放置事件条。</summary>
+    public string HandleRKey()
+    {
+        if (_session?.CurrentLine is null || _editor is null)
+        {
+            return "没有可编辑的判定线";
+        }
+
+        var layout = Layout(_canvas.ActualWidth);
+        var viewport = _session.Viewport;
+        var beat = SnapBeat(viewport.BeatAtY(_lastPointerPosition.Y));
+
+        if (_lastPointerPosition.X <= layout.LeftWidth)
+        {
+            if (!_holdPending)
+            {
+                _holdPending = true;
+                _holdStartBeat = beat;
+                _holdStageX = SnapX(viewport.PixelToStageX(
+                    ClampNotePixel(_lastPointerPosition.X, layout.LeftWidth) - Palette.GridInsetX));
+                Invalidate();
+                return "Hold 起点已设置，移动鼠标后再次按 R 确定终点";
+            }
+
+            if (beat <= _holdStartBeat + 1e-9)
+            {
+                return "Hold 终点必须晚于起点";
+            }
+
+            var note = _editor.PlaceNote(_session.CurrentLine, NoteType.Hold,
+                Beat.FromValue(_holdStartBeat), _holdStageX);
+            note.EndBeat = Beat.FromValue(beat);
+            _session.Document.IsDirty = true;
+            _holdPending = false;
+            _session.SelectedNotes.Clear();
+            _session.SelectedNotes.Add(note);
+            RaiseSelectionChanged();
+            return "已放置 Hold";
+        }
+
+        if (_lastPointerPosition.X < layout.RightLeft)
+        {
+            return "指针不在编辑区内";
+        }
+
+        var channelWidth = ChannelWidth(layout.RightWidth);
+        var gridLeft = layout.RightLeft + Palette.GridInsetX;
+        var channel = (int)((_lastPointerPosition.X - gridLeft) / Math.Max(1, channelWidth));
+        if (channel < 0 || channel >= ActiveTracks.Count)
+        {
+            return "指针不在事件轨道内";
+        }
+
+        if (!_eventPending)
+        {
+            _eventPending = true;
+            _eventStartBeat = beat;
+            _eventChannel = channel;
+            Invalidate();
+            return "事件起点已设置，移动鼠标后再次按 R 确定终点";
+        }
+
+        if (beat <= _eventStartBeat + 1e-9)
+        {
+            return "事件终点必须晚于起点";
+        }
+
+        var kind = ActiveTracks[channel];
+        var value = CurrentValue(_session.CurrentLine, kind, _session.CurrentLayer, _eventStartBeat);
+        var item = _editor.AddEvent(_session.CurrentLine, kind, _session.CurrentLayer,
+            Beat.FromValue(_eventStartBeat), value, value, Beat.FromValue(beat));
+        _eventPending = false;
+        _session.SelectedEvents.Clear();
+        _session.SelectedEvents.Add(item);
+        RaiseSelectionChanged();
+        return $"已放置 {kind.DisplayName()}事件";
+    }
+
+    public void CancelPendingPlacement()
+    {
+        _holdPending = false;
+        _eventPending = false;
+        Invalidate();
+    }
+
+    private void DrawPendingHold(CanvasDrawingSession drawing, EditorSession session, EditViewport viewport,
+        double left, double width, double height)
+    {
+        if (!_holdPending)
+        {
+            return;
+        }
+
+        var gridLeft = left + Palette.GridInsetX;
+        var x = (float)(gridLeft + viewport.StageXToPixel(_holdStageX));
+        var startY = viewport.YAtBeat(_holdStartBeat);
+        var endY = viewport.YAtBeat(SnapBeat(viewport.BeatAtY(_lastPointerPosition.Y)));
+        var top = (float)Math.Max(-10, Math.Min(startY, endY));
+        var bottom = (float)Math.Min(height + 10, Math.Max(startY, endY));
+        var noteWidth = (float)BaseWidth(NoteScale(width), new Note { Size = 1 });
+        drawing.FillRoundedRectangle(new Rect(x - noteWidth / 2, top, noteWidth, Math.Max(2, bottom - top)),
+            4, 4, Windows.UI.Color.FromArgb(120, 60, 230, 90));
+    }
+
+    private void DrawPendingEvent(CanvasDrawingSession drawing, EditorSession session, EditViewport viewport,
+        double left, double width, double height)
+    {
+        if (!_eventPending || _eventChannel < 0 || _eventChannel >= ActiveTracks.Count)
+        {
+            return;
+        }
+
+        var channelWidth = ChannelWidth(width);
+        var barWidth = Math.Max(6, channelWidth * 0.62);
+        var barX = (float)(left + Palette.GridInsetX + _eventChannel * channelWidth + (channelWidth - barWidth) / 2);
+        var startY = viewport.YAtBeat(_eventStartBeat);
+        var endY = viewport.YAtBeat(SnapBeat(viewport.BeatAtY(_lastPointerPosition.Y)));
+        var top = (float)Math.Max(-10, Math.Min(startY, endY));
+        var bottom = (float)Math.Min(height + 10, Math.Max(startY, endY));
+        drawing.FillRectangle(new Rect(barX, top, (float)barWidth, Math.Max(2, bottom - top)),
+            Windows.UI.Color.FromArgb(110, 255, 140, 24));
     }
 
     private void PlaceNote(double x, double y)
@@ -1118,13 +1277,13 @@ public sealed class EditorCanvas : UserControl
         var channelWidth = ChannelWidth(layout.RightWidth);
         var gridLeft = layout.RightLeft + Palette.GridInsetX;
         var channel = (int)((position.X - gridLeft) / Math.Max(1, channelWidth));
-        if (channel < 0 || channel >= Tracks.Count)
+        if (channel < 0 || channel >= ActiveTracks.Count)
         {
             return;
         }
 
         var beat = SnapBeat(_session.Viewport.BeatAtY(position.Y));
-        var kind = Tracks[channel];
+        var kind = ActiveTracks[channel];
         var current = CurrentValue(_session.CurrentLine, kind, _session.CurrentLayer, beat);
         var item = _editor.AddEvent(_session.CurrentLine, kind, _session.CurrentLayer, Beat.FromValue(beat), current);
         _session.SelectedEvents.Clear();
@@ -1179,7 +1338,7 @@ public sealed class EditorCanvas : UserControl
         var channelWidth = ChannelWidth(width);
         var barWidth = Math.Max(6, channelWidth * 0.62);
         var gridLeft = Palette.GridInsetX;
-        for (var channel = 0; channel < Tracks.Count; channel++)
+        for (var channel = 0; channel < ActiveTracks.Count; channel++)
         {
             var barX = gridLeft + channel * channelWidth + (channelWidth - barWidth) / 2;
             if (x < barX - 4 || x > barX + barWidth + 4)
@@ -1187,7 +1346,7 @@ public sealed class EditorCanvas : UserControl
                 continue;
             }
 
-            foreach (var item in _session.CurrentLine.Track(Tracks[channel], _session.CurrentLayer))
+            foreach (var item in _session.CurrentLine.Track(ActiveTracks[channel], _session.CurrentLayer))
             {
                 var top = viewport.YAtBeat(item.EndBeat.Value);
                 var bottom = viewport.YAtBeat(item.StartBeat.Value);

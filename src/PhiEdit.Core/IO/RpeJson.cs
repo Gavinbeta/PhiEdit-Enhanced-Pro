@@ -288,7 +288,9 @@ public static class RpeJson
                 {
                     Type = type,
                     StartBeat = start,
-                    EndBeat = type == NoteType.Hold ? hold : start,
+                    EndBeat = type == NoteType.Hold
+                        ? (hold.Value > start.Value ? hold : Beat.FromValue(start.Value + 1))
+                        : start,
                     PositionX = GetDouble(noteElement, "positionX"),
                     PositionY = GetDouble(noteElement, "positionY"),
                     IsFake = GetBool(noteElement, "isFake"),
@@ -365,6 +367,11 @@ public static class RpeJson
     {
         var start = ReadBeat(element, "startTime");
         var end = ReadBeat(element, "endTime");
+        if (end.Value <= start.Value)
+        {
+            end = Beat.FromValue(start.Value + 1);
+        }
+
         return new LineEvent
         {
             Kind = kind,

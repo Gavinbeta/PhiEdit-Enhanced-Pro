@@ -63,30 +63,6 @@
 
                     <Rectangle Width="1" Height="20" Margin="8,0" Fill="{ThemeResource StrokeBrush}" />
 
-                    <ToggleButton x:Name="SelectToolButton" Style="{StaticResource ToolbarToggleStyle}"
-                                  Click="OnToolClick" Tag="select" IsChecked="True"
-                                  ToolTipService.ToolTip="选择 / 移动 (V)">
-                        <FontIcon Glyph="&#xE762;" FontSize="16" />
-                    </ToggleButton>
-                    <ToggleButton x:Name="TapToolButton" Style="{StaticResource ToolbarToggleStyle}"
-                                  Click="OnToolClick" Tag="tap" ToolTipService.ToolTip="放置 Tap (Q)">
-                        <TextBlock Text="Tap" FontSize="12" />
-                    </ToggleButton>
-                    <ToggleButton x:Name="DragToolButton" Style="{StaticResource ToolbarToggleStyle}"
-                                  Click="OnToolClick" Tag="drag" ToolTipService.ToolTip="放置 Drag (R)">
-                        <TextBlock Text="Drag" FontSize="12" />
-                    </ToggleButton>
-                    <ToggleButton x:Name="FlickToolButton" Style="{StaticResource ToolbarToggleStyle}"
-                                  Click="OnToolClick" Tag="flick" ToolTipService.ToolTip="放置 Flick (E)">
-                        <TextBlock Text="Flick" FontSize="12" />
-                    </ToggleButton>
-                    <ToggleButton x:Name="HoldToolButton" Style="{StaticResource ToolbarToggleStyle}"
-                                  Click="OnToolClick" Tag="hold" ToolTipService.ToolTip="放置 Hold (W)">
-                        <TextBlock Text="Hold" FontSize="12" />
-                    </ToggleButton>
-
-                    <Rectangle Width="1" Height="20" Margin="8,0" Fill="{ThemeResource StrokeBrush}" />
-
                     <Button x:Name="PlayButton" Style="{StaticResource ToolbarButtonStyle}" Click="OnPlayClick"
                             ToolTipService.ToolTip="播放 / 暂停 (空格)">
                         <FontIcon x:Name="PlayGlyph" Glyph="&#xE768;" FontSize="16" />
@@ -260,15 +236,19 @@
                                 <TextBox x:Name="EventEndBeatBox" PlaceholderText="整数:分子/分母"
                                          LostFocus="OnEventBeatEdited" />
                             </StackPanel>
-                            <StackPanel Spacing="6">
+                            <StackPanel x:Name="EventStartValuePanel" Spacing="6">
                                 <TextBlock x:Name="EventStartValueLabel" Text="起点值" Style="{StaticResource FieldLabelStyle}" />
                                 <NumberBox x:Name="EventStartValueBox" SpinButtonPlacementMode="Hidden"
                                            ValueChanged="OnEventValueChanged" />
                             </StackPanel>
-                            <StackPanel Spacing="6">
+                            <StackPanel x:Name="EventEndValuePanel" Spacing="6">
                                 <TextBlock x:Name="EventEndValueLabel" Text="终点值" Style="{StaticResource FieldLabelStyle}" />
                                 <NumberBox x:Name="EventEndValueBox" SpinButtonPlacementMode="Hidden"
                                            ValueChanged="OnEventValueChanged" />
+                            </StackPanel>
+                            <StackPanel x:Name="EventSpecialValuePanel" Spacing="6" Visibility="Collapsed">
+                                <TextBlock x:Name="EventSpecialValueLabel" Text="内容" Style="{StaticResource FieldLabelStyle}" />
+                                <TextBox x:Name="EventSpecialValueBox" LostFocus="OnEventSpecialValueEdited" />
                             </StackPanel>
                             <StackPanel Spacing="6">
                                 <TextBlock Text="缓动类型" Style="{StaticResource FieldLabelStyle}" />

@@ -365,12 +365,18 @@ public sealed class ChartEditor
     public LineEvent AddEvent(JudgeLine line, EventTrackKind kind, int layer, Beat startBeat, double startValue,
         double? endValue = null, Beat? endBeat = null)
     {
+        var end = endBeat ?? Beat.FromValue(startBeat.Value + 1);
+        if (end.Value <= startBeat.Value)
+        {
+            end = Beat.FromValue(startBeat.Value + 1);
+        }
+
         var item = new LineEvent
         {
             Kind = kind,
             Layer = layer,
             StartBeat = startBeat,
-            EndBeat = endBeat ?? startBeat,
+            EndBeat = end,
             StartValue = startValue,
             EndValue = endValue ?? startValue,
             Easing = 1,

@@ -26,18 +26,28 @@ public sealed class NoteSkinRenderer
     public async Task<bool> ApplyAsync(ICanvasResourceCreator creator, NoteSkin skin)
     {
         var loaded = new Dictionary<string, CanvasBitmap>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var name in NoteSkin.RequiredImages)
+        try
         {
-            var bytes = skin.GetFile(name);
-            if (bytes is null)
+            foreach (var name in NoteSkin.RequiredImages)
             {
-                continue;
-            }
+                var bytes = skin.GetFile(name);
+                if (bytes is null)
+                {
+                    continue;
+                }
 
-            using var stream = new MemoryStream(bytes, writable: false);
-            using var random = stream.AsRandomAccessStream();
-            loaded[name] = await CanvasBitmap.LoadAsync(creator, random);
+                using var stream = new MemoryStream(bytes, writable: false);
+                using var random = stream.AsRandomAccessStream();
+                loaded[name] = await CanvasBitmap.LoadAsync(creator, random);
+            }
+        }
+        catch
+        {
+            foreach (var bitmap in loaded.Values)
+            {
+                bitmap.Dispose();
+            }
+            throw;
         }
 
         foreach (var bitmap in _bitmaps.Values)

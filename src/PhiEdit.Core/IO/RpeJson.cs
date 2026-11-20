@@ -7,7 +7,11 @@ using PhiEdit.Core.Charts;
 namespace PhiEdit.Core.IO;
 
 /// <summary>
-/// RPE JSON 谱面读写。保持与原版字段命名一致，确保可与既有谱面互转。
+/// RPE JSON 谱面读写。
+///
+/// 写出格式与 PhiEdit-Base / rpe-next 的 chart.mjs 保持一致：
+/// META + BPMList + judgeLineGroup + judgeLineList，标准事件位于 line.eventLayers 数组，
+/// 扩展事件位于 line.extended。读入同时兼容本程序早期写出过的平铺旧格式。
 /// </summary>
 public static class RpeJson
 {
@@ -17,19 +21,37 @@ public static class RpeJson
         TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver(),
     };
 
+    private static readonly string[] LegacyRootKeys =
+    {
+        "formatVersion", "RPEVersion", "songName", "songArtist", "chartName", "difficulty",
+        "songFilename", "songDuration", "beatMap", "eventGroups", "events",
+    };
+
+    private static readonly string[] LegacyLineKeys =
+    {
+        "id", "time", "eventCount", "isFake", "judgeLineNumber", "x", "y", "rotate",
+        "alpha", "speed", "customBackground", "color", "texture", "vlines", "notes",
+        "events", "eventLayers", "extended",
+    };
+
     public static ChartDocument Read(string json)
     {
-        using var document = JsonDocument.Parse(json);
-        var root = document.RootElement;
+        var text = json.TrimStart('\uFEFF');
+        using var parsed = JsonDocument.Parse(text);
+        var root = parsed.RootElement;
+        var hasMeta = root.TryGetProperty("META", out var meta) && meta.ValueKind == JsonValueKind.Object;
+        var metaElement = hasMeta ? meta : root;
+
         var chart = new ChartDocument
         {
-            SongName = GetString(root, "songName") ?? "Untitled",
-            SongArtist = GetString(root, "songArtist") ?? string.Empty,
-            ChartName = GetString(root, "chartName") ?? "Default",
-            Difficulty = GetString(root, "difficulty") ?? string.Empty,
-            SongFilename = GetString(root, "songFilename") ?? string.Empty,
-            SongDuration = GetDouble(root, "songDuration"),
-            RpeVersion = (int)GetDouble(root, "RPEVersion", 240),
+            SongName = GetString(metaElement, "name") ?? GetString(root, "songName") ?? "Untitled",
+            SongArtist = GetString(metaElement, "composer") ?? GetString(root, "songArtist") ?? string.Empty,
+            ChartName = GetString(metaElement, "charter") ?? GetString(root, "chartName") ?? "Default",
+            Difficulty = GetString(metaElement, "level") ?? GetString(root, "difficulty") ?? string.Empty,
+            SongFilename = GetString(metaElement, "song") ?? GetString(root, "songFilename") ?? string.Empty,
+            SongDuration = hasMeta ? 0 : GetDouble(root, "songDuration"),
+            RpeVersion = (int)GetDouble(metaElement, "RPEVersion", GetDouble(root, "RPEVersion", 170)),
+            RawRoot = JsonNode.Parse(text) as JsonObject,
         };
 
         chart.BpmList.Clear();
@@ -66,16 +88,23 @@ public static class RpeJson
 
     public static string Write(ChartDocument chart)
     {
-        var root = new JsonObject
+        var root = chart.RawRoot?.DeepClone() as JsonObject ?? new JsonObject();
+        foreach (var key in LegacyRootKeys)
         {
-            ["formatVersion"] = 1,
-            ["RPEVersion"] = chart.RpeVersion,
-            ["songName"] = chart.SongName,
-            ["songArtist"] = chart.SongArtist,
-            ["chartName"] = chart.ChartName,
-            ["difficulty"] = chart.Difficulty,
-            ["songFilename"] = chart.SongFilename,
-            ["songDuration"] = chart.SongDuration,
+            root.Remove(key);
+        }
+
+        root["META"] = new JsonObject
+        {
+            ["RPEVersion"] = Math.Max(170, chart.RpeVersion),
+            ["name"] = chart.SongName,
+            ["composer"] = chart.SongArtist,
+            ["charter"] = chart.ChartName,
+            ["illustration"] = string.Empty,
+            ["level"] = chart.Difficulty,
+            ["song"] = chart.SongFilename,
+            ["background"] = string.Empty,
+            ["offset"] = 0,
         };
 
         var bpmArray = new JsonArray();
@@ -90,21 +119,13 @@ public static class RpeJson
 
         root["BPMList"] = bpmArray;
 
-        var tempo = chart.BuildTempoMap();
-        var beatMap = new JsonObject();
-        foreach (var point in chart.BpmList)
+        var groups = root["judgeLineGroup"] as JsonArray;
+        if (groups is null || groups.Count == 0)
         {
-            beatMap[point.StartBeat.ToString()] = new JsonArray
-            {
-                new JsonObject
-                {
-                    ["beat"] = WriteBeat(point.StartBeat),
-                    ["time"] = Math.Round(tempo.SecondsAt(point.StartBeat.Value), 6),
-                },
-            };
+            groups = new JsonArray("Default");
         }
 
-        root["beatMap"] = beatMap;
+        root["judgeLineGroup"] = groups;
 
         var lineArray = new JsonArray();
         foreach (var line in chart.Lines)
@@ -113,175 +134,178 @@ public static class RpeJson
         }
 
         root["judgeLineList"] = lineArray;
-        root["judgeLineGroup"] = new JsonObject();
-        root["eventGroups"] = new JsonArray();
-
         return root.ToJsonString(WriteOptions);
     }
 
     private static JsonObject WriteLine(JudgeLine line)
     {
-        var node = new JsonObject
+        var node = line.RawNode?.DeepClone() as JsonObject ?? new JsonObject();
+        foreach (var key in LegacyLineKeys)
         {
-            ["id"] = line.Id,
-            ["time"] = WriteBeat(line.Time),
-            ["eventCount"] = line.Track(EventTrackKind.X).Count + line.Track(EventTrackKind.Y).Count +
-                            line.Track(EventTrackKind.Rotate).Count + line.Track(EventTrackKind.Alpha).Count +
-                            line.Track(EventTrackKind.Speed).Count,
-            ["isFake"] = line.IsFake,
-            ["judgeLineNumber"] = line.Number,
-            ["x"] = line.X,
-            ["y"] = line.Y,
-            ["rotate"] = line.Rotate,
-            ["alpha"] = line.Alpha,
-            ["speed"] = line.Speed,
-            ["customBackground"] = line.CustomBackground ?? string.Empty,
-            ["color"] = line.Color ?? string.Empty,
-            ["texture"] = line.Texture ?? string.Empty,
-            ["vlines"] = new JsonArray(),
-        };
+            node.Remove(key);
+        }
+
+        node["Name"] = $"判定线 {line.Number}";
+        node["Group"] = 0;
+        node["Texture"] = string.IsNullOrEmpty(line.Texture) ? "line.png" : line.Texture;
+        node["bpmfactor"] = 1;
+        node["father"] = -1;
+        node["rotateWithFather"] = true;
+        node["isCover"] = 1;
+        node["zOrder"] = 0;
+        node["anchor"] = new JsonArray(0.5, 0.5);
+        node["isGif"] = false;
+        node["numOfNotes"] = line.Notes.Count;
 
         var noteArray = new JsonArray();
         foreach (var note in line.Notes)
         {
-            noteArray.Add(new JsonObject
-            {
-                ["type"] = (int)note.Type,
-                ["time"] = WriteBeat(note.StartBeat),
-                ["positionX"] = note.PositionX,
-                ["positionY"] = note.PositionY,
-                ["holdTime"] = WriteBeat(note.EndBeat),
-                ["isFake"] = note.IsFake,
-                ["up"] = note.IsUp ? 1 : 0,
-                ["speed"] = note.Speed,
-                ["size"] = note.Size,
-                ["visualTime"] = note.VisibleTime,
-                ["alpha"] = note.Alpha,
-                ["judgeLineNumber"] = line.Number,
-            });
+            var noteNode = note.RawNode?.DeepClone() as JsonObject ?? new JsonObject();
+            noteNode["type"] = (int)note.Type;
+            noteNode["startTime"] = WriteBeat(note.StartBeat);
+            noteNode["endTime"] = WriteBeat(note.Type == NoteType.Hold ? note.EndBeat : note.StartBeat);
+            noteNode["positionX"] = note.PositionX;
+            noteNode["yOffset"] = note.PositionY;
+            noteNode["above"] = note.IsUp ? 1 : 0;
+            noteNode["isFake"] = note.IsFake ? 1 : 0;
+            noteNode["speed"] = note.Speed;
+            noteNode["size"] = note.Size;
+            noteNode["visibleTime"] = note.VisibleTime;
+            noteNode["alpha"] = note.Alpha;
+            noteArray.Add(noteNode);
         }
 
         node["notes"] = noteArray;
 
-        var events = new JsonObject();
-        foreach (var kind in EventTrackKinds.Standard.Concat(EventTrackKinds.Extended))
+        var layers = new JsonArray();
+        var layer0 = CreateEmptyStandardLayer();
+        foreach (var item in line.Events.Where(item => EventTrackKinds.Standard.Contains(item.Kind)))
         {
-            var list = line.Track(kind);
-            if (list.Count == 0)
-            {
-                continue;
-            }
-
-            var array = new JsonArray();
-            foreach (var item in list)
-            {
-                var entry = new JsonObject
-                {
-                    ["startTime"] = WriteBeat(item.StartBeat),
-                    ["endTime"] = WriteBeat(item.EndBeat),
-                    ["start"] = item.StartValue,
-                    ["end"] = item.EndValue,
-                    ["linkgroup"] = item.LinkedGroup,
-                    ["curveType"] = 0,
-                    ["easing"] = item.Easing,
-                    ["easingLeft"] = item.EasingLeft,
-                    ["easingRight"] = item.EasingRight,
-                    ["inst"] = item.IsHooked ? 1 : 0,
-                };
-
-                if (!string.IsNullOrEmpty(item.Text))
-                {
-                    entry["text"] = item.Text;
-                }
-
-                if (!string.IsNullOrEmpty(item.Color))
-                {
-                    entry["color"] = item.Color;
-                }
-
-                if (!string.IsNullOrEmpty(item.EndColor))
-                {
-                    entry["endColor"] = item.EndColor;
-                }
-
-                if (!string.IsNullOrEmpty(item.StartText))
-                {
-                    entry["startText"] = item.StartText;
-                }
-
-                if (!string.IsNullOrEmpty(item.EndText))
-                {
-                    entry["endText"] = item.EndText;
-                }
-
-                if (item.Kind == EventTrackKind.Paint)
-                {
-                    entry["shaderType"] = item.ShaderType ?? string.Empty;
-                    entry["shaderGlobal"] = item.ShaderGlobal;
-                    entry["shaderAutoAlign"] = item.ShaderAutoAlign;
-                    entry["shaderOrder"] = item.ShaderOrder;
-                    entry["shaderParameter"] = item.ShaderParameter ?? string.Empty;
-                    entry["shaderCode"] = item.ShaderCode ?? string.Empty;
-                }
-
-                array.Add(entry);
-            }
-
-            events[kind.Key()] = array;
+            AddEvent(layer0, item);
         }
 
-        node["events"] = events;
-
-        if (line.Layers.Count > 0)
+        layers.Add(layer0);
+        foreach (var layerIndex in line.Layers.Keys.Where(index => index > 0 && index != JudgeLine.SpecialLayer).Order())
         {
-            var layerObject = new JsonObject();
-            JsonObject? extended = null;
-            foreach (var layer in line.Layers)
+            var layer = CreateEmptyStandardLayer();
+            foreach (var track in line.Layers[layerIndex])
             {
-                var tracks = new JsonObject();
-                foreach (var track in layer.Value)
+                if (!EventTrackKinds.Standard.Contains(track.Key))
                 {
-                    var array = new JsonArray();
-                    foreach (var item in track.Value)
-                    {
-                        array.Add(new JsonObject
-                        {
-                            ["startTime"] = WriteBeat(item.StartBeat),
-                            ["endTime"] = WriteBeat(item.EndBeat),
-                            ["start"] = item.StartValue,
-                            ["end"] = item.EndValue,
-                            ["linkgroup"] = item.LinkedGroup,
-                            ["curveType"] = 0,
-                            ["easing"] = item.Easing,
-                            ["easingLeft"] = item.EasingLeft,
-                            ["easingRight"] = item.EasingRight,
-                        });
-                    }
-
-                    tracks[track.Key.Key()] = array;
-                }
-
-                if (layer.Key == JudgeLine.SpecialLayer)
-                {
-                    extended = tracks;
                     continue;
                 }
 
-                layerObject[layer.Key.ToString(CultureInfo.InvariantCulture)] = tracks;
+                foreach (var item in track.Value)
+                {
+                    AddEvent(layer, item);
+                }
             }
 
-            if (layerObject.Count > 0)
-            {
-                node["eventLayers"] = layerObject;
-            }
+            layers.Add(layer);
+        }
 
-            if (extended is not null)
+        node["eventLayers"] = layers;
+
+        var extended = new JsonObject();
+        foreach (var item in line.Events.Where(item => EventTrackKinds.Extended.Contains(item.Kind)))
+        {
+            AddEvent(extended, item);
+        }
+
+        if (line.Layers.TryGetValue(JudgeLine.SpecialLayer, out var special))
+        {
+            foreach (var track in special)
             {
-                node["extended"] = extended;
+                foreach (var item in track.Value)
+                {
+                    AddEvent(extended, item);
+                }
             }
         }
 
+        node["extended"] = extended;
         return node;
+    }
+
+    private static JsonObject CreateEmptyStandardLayer()
+    {
+        var layer = new JsonObject();
+        foreach (var kind in EventTrackKinds.Standard)
+        {
+            layer[kind.Key()] = new JsonArray();
+        }
+
+        return layer;
+    }
+
+    private static void AddEvent(JsonObject layer, LineEvent item)
+    {
+        if (layer[item.Kind.Key()] is not JsonArray array)
+        {
+            array = new JsonArray();
+            layer[item.Kind.Key()] = array;
+        }
+
+        array.Add(WriteEvent(item));
+    }
+
+    private static JsonObject WriteEvent(LineEvent item)
+    {
+        var node = item.RawNode?.DeepClone() as JsonObject ?? new JsonObject();
+        node["startTime"] = WriteBeat(item.StartBeat);
+        node["endTime"] = WriteBeat(item.EndBeat);
+
+        if (item.Kind == EventTrackKind.Color)
+        {
+            node["start"] = ParseRgb(item.Color);
+            node["end"] = ParseRgb(item.EndColor ?? item.Color);
+        }
+        else if (item.Kind == EventTrackKind.Text)
+        {
+            node["start"] = item.StartText ?? string.Empty;
+            node["end"] = item.EndText ?? string.Empty;
+        }
+        else
+        {
+            node["start"] = item.StartValue;
+            node["end"] = item.EndValue;
+        }
+
+        node["easingType"] = Math.Max(1, item.Easing);
+        node["easingLeft"] = item.EasingLeft;
+        node["easingRight"] = item.EasingRight;
+        node["bezier"] = 0;
+        node["bezierPoints"] = new JsonArray(0, 0, 1, 1);
+        node["linkgroup"] = item.LinkedGroup;
+        // 扩展字段：参考程序会原样透传，本程序用它恢复“钩定”状态。
+        node["inst"] = item.IsHooked ? 1 : 0;
+
+        if (item.Kind == EventTrackKind.Paint)
+        {
+            node["shader"] = item.ShaderType ?? string.Empty;
+            node["line"] = item.ShaderOrder;
+            node["vars"] = new JsonObject { [item.ShaderParameter ?? "sampleCount"] = item.StartValue };
+        }
+
+        return node;
+    }
+
+    private static JsonArray ParseRgb(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return new JsonArray(255, 255, 255);
+        }
+
+        var parts = value.Split(',', StringSplitOptions.TrimEntries);
+        if (parts.Length == 3 && parts.All(part => int.TryParse(part, out _)))
+        {
+            return new JsonArray(int.Parse(parts[0], CultureInfo.InvariantCulture),
+                int.Parse(parts[1], CultureInfo.InvariantCulture),
+                int.Parse(parts[2], CultureInfo.InvariantCulture));
+        }
+
+        return new JsonArray(255, 255, 255);
     }
 
     private static JudgeLine ReadLine(JsonElement element, int index)
@@ -290,25 +314,26 @@ public static class RpeJson
         {
             Id = (int)GetDouble(element, "id", index),
             Number = (int)GetDouble(element, "judgeLineNumber", index),
-            Time = ReadBeat(element, "time"),
+            Time = ReadBeat(element, "time", "startTime"),
             X = GetDouble(element, "x"),
             Y = GetDouble(element, "y"),
             Rotate = GetDouble(element, "rotate"),
-            Alpha = GetDouble(element, "alpha", 1),
+            Alpha = GetDouble(element, "alpha", 255) / 255.0,
             Speed = GetDouble(element, "speed", 1),
             IsFake = GetBool(element, "isFake"),
-            Texture = GetString(element, "texture"),
+            Texture = GetString(element, "Texture") ?? GetString(element, "texture"),
             Color = GetString(element, "color"),
             CustomBackground = GetString(element, "customBackground"),
+            RawNode = JsonNode.Parse(element.GetRawText()) as JsonObject,
         };
 
         if (element.TryGetProperty("notes", out var notes) && notes.ValueKind == JsonValueKind.Array)
         {
             foreach (var noteElement in notes.EnumerateArray())
             {
-                var type = (NoteType)(int)GetDouble(noteElement, "type", 1);
-                var start = ReadBeat(noteElement, "time");
-                var hold = ReadBeat(noteElement, "holdTime");
+                var type = (NoteType)Math.Clamp((int)GetDouble(noteElement, "type", 1), 1, 4);
+                var start = ReadBeat(noteElement, "startTime", "time");
+                var hold = ReadBeat(noteElement, "endTime", "holdTime");
                 line.Notes.Add(new Note
                 {
                     Type = type,
@@ -317,30 +342,43 @@ public static class RpeJson
                         ? (hold.Value > start.Value ? hold : Beat.FromValue(start.Value + 1))
                         : start,
                     PositionX = GetDouble(noteElement, "positionX"),
-                    PositionY = GetDouble(noteElement, "positionY"),
+                    PositionY = GetDouble(noteElement, "yOffset", GetDouble(noteElement, "positionY")),
                     IsFake = GetBool(noteElement, "isFake"),
-                    IsUp = !noteElement.TryGetProperty("up", out var upValue) || upValue.GetDouble() != 0,
+                    IsUp = ReadAbove(noteElement),
                     Speed = GetDouble(noteElement, "speed", 1),
                     Size = GetDouble(noteElement, "size", 1),
-                    VisibleTime = GetDouble(noteElement, "visualTime", 999999),
+                    VisibleTime = GetDouble(noteElement, "visibleTime", GetDouble(noteElement, "visualTime", 999999)),
                     Alpha = GetDouble(noteElement, "alpha", 255),
+                    RawNode = JsonNode.Parse(noteElement.GetRawText()) as JsonObject,
                 });
             }
         }
 
-        if (element.TryGetProperty("events", out var events) && events.ValueKind == JsonValueKind.Object)
+        // 新格式：eventLayers 是数组，extended 是独立对象。
+        if (element.TryGetProperty("eventLayers", out var layerValue))
         {
-            foreach (var property in events.EnumerateObject())
+            if (layerValue.ValueKind == JsonValueKind.Array)
             {
-                var kind = EventTrackKinds.FromKey(property.Name);
-                if (kind is null || property.Value.ValueKind != JsonValueKind.Array)
+                var layerIndex = 0;
+                foreach (var layer in layerValue.EnumerateArray())
                 {
-                    continue;
-                }
+                    if (layer.ValueKind == JsonValueKind.Object)
+                    {
+                        ReadEventLayer(line, layer, layerIndex);
+                    }
 
-                foreach (var eventElement in property.Value.EnumerateArray())
+                    layerIndex++;
+                }
+            }
+            else if (layerValue.ValueKind == JsonValueKind.Object)
+            {
+                // 兼容本程序早期写出的对象形式。
+                foreach (var property in layerValue.EnumerateObject())
                 {
-                    line.AddEvent(ReadEvent(eventElement, kind.Value, 0));
+                    if (int.TryParse(property.Name, out var layerIndex) && property.Value.ValueKind == JsonValueKind.Object)
+                    {
+                        ReadEventLayer(line, property.Value, layerIndex);
+                    }
                 }
             }
         }
@@ -350,22 +388,10 @@ public static class RpeJson
             ReadEventLayer(line, extended, JudgeLine.SpecialLayer);
         }
 
-        if (element.TryGetProperty("eventLayers", out var layerObject) && layerObject.ValueKind == JsonValueKind.Object)
+        // 兼容早期平铺 events 对象。
+        if (element.TryGetProperty("events", out var legacyEvents) && legacyEvents.ValueKind == JsonValueKind.Object)
         {
-            foreach (var layerProperty in layerObject.EnumerateObject())
-            {
-                if (!int.TryParse(layerProperty.Name, out var layerIndex) || layerIndex == JudgeLine.SpecialLayer)
-                {
-                    continue;
-                }
-
-                if (layerProperty.Value.ValueKind != JsonValueKind.Object)
-                {
-                    continue;
-                }
-
-                ReadEventLayer(line, layerProperty.Value, layerIndex);
-            }
+            ReadEventLayer(line, legacyEvents, 0);
         }
 
         return line;
@@ -397,54 +423,97 @@ public static class RpeJson
             end = Beat.FromValue(start.Value + 1);
         }
 
+        var startValue = GetDouble(element, "start");
+        var endValue = GetDouble(element, "end");
+        var color = GetString(element, "startColor");
+        var endColor = GetString(element, "endColor");
+        var startText = GetString(element, "startText");
+        var endText = GetString(element, "endText");
+
+        if (kind == EventTrackKind.Color && element.TryGetProperty("start", out var colorValue) && colorValue.ValueKind == JsonValueKind.Array)
+        {
+            color = FormatRgb(colorValue);
+            endColor = element.TryGetProperty("end", out var endColorValue) && endColorValue.ValueKind == JsonValueKind.Array
+                ? FormatRgb(endColorValue)
+                : color;
+        }
+
+        if (kind == EventTrackKind.Text)
+        {
+            startText = GetString(element, "start") ?? startText;
+            endText = GetString(element, "end") ?? endText;
+        }
+
         return new LineEvent
         {
             Kind = kind,
             Layer = layer,
             StartBeat = start,
             EndBeat = end,
-            StartValue = GetDouble(element, "start"),
-            EndValue = GetDouble(element, "end"),
+            StartValue = startValue,
+            EndValue = endValue,
             LinkedGroup = (int)GetDouble(element, "linkgroup"),
-            Easing = (int)GetDouble(element, "easing"),
+            Easing = (int)GetDouble(element, "easingType", GetDouble(element, "easing", 1)),
             EasingLeft = GetDouble(element, "easingLeft"),
             EasingRight = GetDouble(element, "easingRight", 1),
             IsHooked = GetDouble(element, "inst") == 1,
             Text = GetString(element, "text"),
-            Color = GetString(element, "color"),
-            EndColor = GetString(element, "endColor"),
-            StartText = GetString(element, "startText"),
-            EndText = GetString(element, "endText"),
-            ShaderType = GetString(element, "shaderType") ?? "chromatic",
+            Color = color ?? GetString(element, "color"),
+            EndColor = endColor,
+            StartText = startText,
+            EndText = endText,
+            ShaderType = GetString(element, "shader") ?? GetString(element, "shaderType") ?? "chromatic",
             ShaderGlobal = GetBool(element, "shaderGlobal"),
-            ShaderAutoAlign = !element.TryGetProperty("shaderAutoAlign", out var autoAlign) || GetBool(element, "shaderAutoAlign"),
-            ShaderOrder = (int)GetDouble(element, "shaderOrder"),
+            ShaderAutoAlign = !element.TryGetProperty("shaderAutoAlign", out _) || GetBool(element, "shaderAutoAlign"),
+            ShaderOrder = (int)GetDouble(element, "line", GetDouble(element, "shaderOrder")),
             ShaderParameter = GetString(element, "shaderParameter") ?? "sampleCount",
             ShaderCode = GetString(element, "shaderCode"),
+            RawNode = JsonNode.Parse(element.GetRawText()) as JsonObject,
         };
     }
 
-    private static Beat ReadBeat(JsonElement element, string property)
+    private static string FormatRgb(JsonElement value)
     {
-        if (!element.TryGetProperty(property, out var value))
+        var parts = value.EnumerateArray().Select(item => item.GetDouble()).ToArray();
+        return parts.Length == 3
+            ? string.Join(", ", parts.Select(part => Math.Clamp((int)part, 0, 255).ToString(CultureInfo.InvariantCulture)))
+            : "255, 255, 255";
+    }
+
+    private static bool ReadAbove(JsonElement element)
+    {
+        if (element.TryGetProperty("above", out var above))
         {
-            return Beat.Zero;
+            return GetBool(above);
         }
 
-        if (value.ValueKind == JsonValueKind.Array)
+        return !element.TryGetProperty("up", out var up) || GetBool(up);
+    }
+
+    private static Beat ReadBeat(JsonElement element, params string[] properties)
+    {
+        foreach (var property in properties)
         {
-            var parts = value.EnumerateArray().Select(item => (int)item.GetDouble()).ToArray();
-            if (parts.Length >= 3 && parts[2] > 0)
+            if (!element.TryGetProperty(property, out var value))
             {
-                return new Beat(parts[0], parts[1], parts[2]);
+                continue;
             }
 
-            return Beat.Zero;
-        }
+            if (value.ValueKind == JsonValueKind.Array)
+            {
+                var parts = value.EnumerateArray().Select(item => (int)item.GetDouble()).ToArray();
+                if (parts.Length >= 3 && parts[2] > 0)
+                {
+                    return new Beat(parts[0], parts[1], parts[2]);
+                }
 
-        if (value.ValueKind == JsonValueKind.Number)
-        {
-            return Beat.FromValue(value.GetDouble());
+                return Beat.Zero;
+            }
+
+            if (value.ValueKind == JsonValueKind.Number)
+            {
+                return Beat.FromValue(value.GetDouble());
+            }
         }
 
         return Beat.Zero;
@@ -468,6 +537,13 @@ public static class RpeJson
             : fallback;
 
     private static bool GetBool(JsonElement element, string property) =>
-        element.TryGetProperty(property, out var value) &&
-        value.ValueKind is JsonValueKind.True or JsonValueKind.Number && value.GetDouble() != 0;
+        element.TryGetProperty(property, out var value) && GetBool(value);
+
+    private static bool GetBool(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.True => true,
+        JsonValueKind.Number => value.GetDouble() != 0,
+        JsonValueKind.String => bool.TryParse(value.GetString(), out var parsed) && parsed,
+        _ => false,
+    };
 }

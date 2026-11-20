@@ -88,6 +88,56 @@ public class RpeJsonTests
     }
 
     [Fact]
+    public void Write_UsesReferenceChartFormat()
+    {
+        var chart = new ChartDocument();
+        var line = chart.AddLine();
+        line.Notes.Add(new Note { Type = NoteType.Tap, StartBeat = Beat.FromValue(1), PositionX = 20 });
+        line.AddEvent(new LineEvent
+        {
+            Kind = EventTrackKind.X,
+            StartBeat = Beat.FromValue(0),
+            EndBeat = Beat.FromValue(1),
+            Easing = 6,
+        });
+
+        var json = RpeJson.Write(chart);
+        Assert.Contains("\"META\"", json);
+        Assert.Contains("\"eventLayers\"", json);
+        Assert.Contains("\"moveXEvents\"", json);
+        Assert.Contains("\"easingType\"", json);
+        Assert.DoesNotContain("\"formatVersion\"", json);
+        Assert.DoesNotContain("\"holdTime\"", json);
+    }
+
+    [Fact]
+    public void Read_NewFormatAndPreserveUnknownFields()
+    {
+        const string json = """
+        {
+          "META": { "RPEVersion": 170, "name": "Fixture", "offset": 0 },
+          "BPMList": [{ "bpm": 120, "startTime": [0, 0, 1] }],
+          "judgeLineList": [{
+            "Name": "Line", "eventLayers": [{
+              "alphaEvents": [{ "startTime": [0,0,1], "endTime": [1,0,1], "start": 255, "end": 255, "easingType": 1 }]
+            }],
+            "notes": [{ "type": 1, "startTime": [2,0,1], "endTime": [2,0,1], "positionX": 10, "above": 1, "alpha": 255 }]
+          }],
+          "unknownExtension": { "preserve": true }
+        }
+        """;
+
+        var chart = RpeJson.Read(json);
+        Assert.Single(chart.Lines);
+        Assert.Single(chart.Lines[0].Notes);
+        Assert.Single(chart.Lines[0].Track(EventTrackKind.Alpha));
+
+        var written = RpeJson.Write(chart);
+        Assert.Contains("\"unknownExtension\"", written);
+        Assert.Contains("\"alphaEvents\"", written);
+    }
+
+    [Fact]
     public void Read_ToleratesMissingFields()
     {
         var chart = RpeJson.Read("{\"judgeLineList\":[{\"notes\":[{\"type\":1}]}]}");

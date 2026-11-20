@@ -92,6 +92,11 @@ public readonly struct Beat : IComparable<Beat>, IEquatable<Beat>
             }
         }
 
+        if (double.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out var real))
+        {
+            return FromValue(real);
+        }
+
         var (num, den) = ParseFraction(trimmed);
         if (den == 1)
         {

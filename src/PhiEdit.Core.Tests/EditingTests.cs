@@ -99,6 +99,38 @@ public class EditingTests
     }
 
     [Fact]
+    public void AddLine_UndoAndRedoCreateExactlyOneLine()
+    {
+        var (session, editor) = CreateSession();
+        var before = session.Document.Lines.Count;
+
+        var added = editor.AddLine();
+
+        Assert.Equal(before + 1, session.Document.Lines.Count);
+        session.Undo.Undo();
+        Assert.Equal(before, session.Document.Lines.Count);
+        Assert.DoesNotContain(added, session.Document.Lines);
+        session.Undo.Redo();
+        Assert.Equal(before + 1, session.Document.Lines.Count);
+    }
+
+    [Fact]
+    public void RemoveLine_IsUndoableAndRedoable()
+    {
+        var (session, editor) = CreateSession();
+        var line = session.Document.Lines[0];
+
+        editor.RemoveLine(line);
+        Assert.DoesNotContain(line, session.Document.Lines);
+
+        session.Undo.Undo();
+        Assert.Contains(line, session.Document.Lines);
+
+        session.Undo.Redo();
+        Assert.DoesNotContain(line, session.Document.Lines);
+    }
+
+    [Fact]
     public void UndoStack_ClearsRedoOnNewAction()
     {
         var (session, editor) = CreateSession();

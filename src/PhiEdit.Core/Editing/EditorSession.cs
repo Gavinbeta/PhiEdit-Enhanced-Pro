@@ -44,9 +44,6 @@ public sealed class EditorSession
     /// <summary>是否吸附到拍细分线。</summary>
     public bool SnapTime { get; set; } = true;
 
-    /// <summary>当前放置工具；为 null 表示处于「选择」模式（框选 / 移动，不放置音符）。</summary>
-    public NoteType? Tool { get; set; } = NoteType.Tap;
-
     /// <summary>当前事件层。</summary>
     public int CurrentLayer { get; set; }
 

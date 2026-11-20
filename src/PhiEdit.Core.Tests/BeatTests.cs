@@ -25,6 +25,7 @@ public class BeatTests
     [InlineData("3:0/1", 3.0)]
     [InlineData("5", 5.0)]
     [InlineData("1/2", 0.5)]
+    [InlineData("1.5", 1.5)]
     public void Parse_HandlesCommonFormats(string text, double expected)
     {
         Assert.Equal(expected, Beat.Parse(text).Value, 6);

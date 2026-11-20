@@ -40,13 +40,9 @@ public sealed partial class MainWindow : Window
     private bool _refreshingInspector;
 
     private Note? _noteEditSnapshot;
+    private Note? _noteEditSource;
 
     private readonly HashSet<VirtualKey> _heldPlacementKeys = new();
-
-    // 单一画布：这些别名让既有调用保持兼容，实际都指向同一块 EditorCanvas。
-    private EditorCanvas NoteSurface => EditorCanvas;
-    private EditorCanvas EventSurface => EditorCanvas;
-    private EditorCanvas BeatRuler => EditorCanvas;
 
     public MainWindow()
     {
@@ -59,24 +55,13 @@ public sealed partial class MainWindow : Window
         ApplyInitialWindowPlacement();
 
         _clock.Tempo = _session.Document.BuildTempoMap();
-        // 鼠标只用于选择/拖动/框选；物件改由 Q/W/E/R 在指针处放置。
-        _session.Tool = null;
+        EditorCanvas.Session = _session;
+        EditorCanvas.Editor = _editor;
+        EditorCanvas.Palette = _palette;
+        EditorCanvas.Renderer = _skinRenderer;
 
-        NoteSurface.Session = _session;
-        NoteSurface.Editor = _editor;
-        NoteSurface.Palette = _palette;
-        NoteSurface.Renderer = _skinRenderer;
-        BeatRuler.Session = _session;
-        BeatRuler.Palette = _palette;
-        EventSurface.Session = _session;
-        EventSurface.Editor = _editor;
-        EventSurface.Palette = _palette;
-
-        NoteSurface.SkinLoadFailed += (_, message) => StatusReadout.Text = message;
-        // 选择变化时两侧都要重绘：否则另一侧会残留旧的选中高亮，
-        // 看起来像是「音符和事件同时被选中」。
-        NoteSurface.SelectionChanged += (_, _) => OnSelectionChanged();
-        EventSurface.SelectionChanged += (_, _) => OnSelectionChanged();
+        EditorCanvas.SkinLoadFailed += (_, message) => StatusReadout.Text = message;
+        EditorCanvas.SelectionChanged += (_, _) => OnSelectionChanged();
         _session.Viewport.ViewChanged += (_, _) => OnViewChanged();
         Scrubber.ValueChanged += (sender, args) => OnScrubberChanged(sender, args);
         EditorSplitter.Dragged += (_, delta) => ApplyEditorSplit(delta);
@@ -237,28 +222,19 @@ public sealed partial class MainWindow : Window
         e.Handled = true;
     }
 
-    /// <summary>判断指针是否位于两个编辑区之内。</summary>
+    /// <summary>判断指针是否位于编辑画布之内。</summary>
     private bool IsOverEditorArea(Point position)
     {
-        foreach (var surface in new FrameworkElement[] { NoteSurface, EventSurface })
-        {
-            var bounds = surface.TransformToVisual(RootLayout).TransformBounds(
-                new Rect(0, 0, surface.ActualWidth, surface.ActualHeight));
-            if (bounds.Contains(position))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        var bounds = EditorCanvas.TransformToVisual(RootLayout).TransformBounds(
+            new Rect(0, 0, EditorCanvas.ActualWidth, EditorCanvas.ActualHeight));
+        return bounds.Contains(position);
     }
 
     /// <summary>把窗口坐标转换为编辑区内部的纵坐标。</summary>
     private double EditorLocalY(Point position)
     {
-        var surface = NoteSurface;
-        var bounds = surface.TransformToVisual(RootLayout).TransformBounds(
-            new Rect(0, 0, surface.ActualWidth, surface.ActualHeight));
+        var bounds = EditorCanvas.TransformToVisual(RootLayout).TransformBounds(
+            new Rect(0, 0, EditorCanvas.ActualWidth, EditorCanvas.ActualHeight));
         return bounds.Contains(position) ? position.Y - bounds.Top : 0;
     }
 
@@ -439,7 +415,7 @@ public sealed partial class MainWindow : Window
     /// <summary>应用资源包：贴图由画布在设备就绪后加载。</summary>
     private void ApplySkinAsync(PhiEdit.Core.Skins.NoteSkin skin)
     {
-        NoteSurface.RequestSkinReload();
+        EditorCanvas.RequestSkinReload();
         StatusReadout.Text = $"已应用皮肤：{skin.Info.Name}";
     }
 
@@ -635,8 +611,7 @@ public sealed partial class MainWindow : Window
     private void OnSelectionChanged()
     {
         RefreshInspector();
-        NoteSurface.Invalidate();
-        EventSurface.Invalidate();
+        EditorCanvas.Invalidate();
     }
 
 
@@ -654,9 +629,7 @@ public sealed partial class MainWindow : Window
         }
 
         RefreshTimeline();
-        NoteSurface.Invalidate();
-        EventSurface.Invalidate();
-        BeatRuler.Invalidate();
+        EditorCanvas.Invalidate();
     }
 
 
@@ -668,9 +641,7 @@ public sealed partial class MainWindow : Window
         RefreshBpmList();
         RefreshInspector();
         RefreshTimeline();
-        NoteSurface.Invalidate();
-        EventSurface.Invalidate();
-        BeatRuler.Invalidate();
+        EditorCanvas.Invalidate();
     }
 
     private void RefreshTimeline()
@@ -745,10 +716,9 @@ public sealed partial class MainWindow : Window
             var note = _session.SelectedNotes.FirstOrDefault();
             if (note is not null)
             {
-                if (!ReferenceEquals(_noteEditSnapshot?.OwningLine, note.OwningLine) ||
-                    _noteEditSnapshot?.StartBeat.Value != note.StartBeat.Value ||
-                    _noteEditSnapshot?.PositionX != note.PositionX)
+                if (!ReferenceEquals(_noteEditSource, note))
                 {
+                    _noteEditSource = note;
                     _noteEditSnapshot = note.Clone();
                 }
 
@@ -769,6 +739,7 @@ public sealed partial class MainWindow : Window
             }
             else
             {
+                _noteEditSource = null;
                 _noteEditSnapshot = null;
                 NoteStartBeatBox.Text = string.Empty;
                 NoteEndBeatBox.Text = string.Empty;
@@ -870,8 +841,7 @@ public sealed partial class MainWindow : Window
         RefreshLineSelector();
         RefreshLineList();
         RefreshInspector();
-        NoteSurface.Invalidate();
-        EventSurface.Invalidate();
+        EditorCanvas.Invalidate();
     }
 
     // ---------------------------------------------------------------- 播放
@@ -897,6 +867,8 @@ public sealed partial class MainWindow : Window
     {
         _session.Document = new ChartDocument();
         _session.Document.AddLine();
+        _session.CurrentLineIndex = 0;
+        _currentFilePath = null;
         _session.Undo.Clear();
         _session.ClearSelection();
         _clock.Reset();
@@ -953,8 +925,8 @@ public sealed partial class MainWindow : Window
         }
 
         _session.Division = (int)e.NewValue;
-        NoteSurface.Invalidate();
-        EventSurface.Invalidate();
+        EditorCanvas.Invalidate();
+        EditorCanvas.Invalidate();
     }
 
     private void OnGridCountChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
@@ -965,7 +937,7 @@ public sealed partial class MainWindow : Window
         }
 
         _session.GridCount = (int)e.NewValue;
-        NoteSurface.Invalidate();
+        EditorCanvas.Invalidate();
     }
 
     private void OnSnapToggled(object sender, RoutedEventArgs e)
@@ -1126,7 +1098,7 @@ public sealed partial class MainWindow : Window
         }
 
         _session.Document.IsDirty = true;
-        NoteSurface.Invalidate();
+        EditorCanvas.Invalidate();
         RefreshInspector();
     }
 
@@ -1145,7 +1117,7 @@ public sealed partial class MainWindow : Window
 
         note.PositionX = e.NewValue;
         _session.Document.IsDirty = true;
-        NoteSurface.Invalidate();
+        EditorCanvas.Invalidate();
     }
 
     private void OnNotePositionYChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
@@ -1163,7 +1135,7 @@ public sealed partial class MainWindow : Window
 
         note.PositionY = e.NewValue;
         _session.Document.IsDirty = true;
-        NoteSurface.Invalidate();
+        EditorCanvas.Invalidate();
     }
 
     private void OnNoteFallDirectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1181,7 +1153,7 @@ public sealed partial class MainWindow : Window
 
         note.IsUp = NoteFallDirectionBox.SelectedIndex == 0;
         _session.Document.IsDirty = true;
-        NoteSurface.Invalidate();
+        EditorCanvas.Invalidate();
     }
 
     private void OnNoteSpeedChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
@@ -1216,7 +1188,7 @@ public sealed partial class MainWindow : Window
 
         note.IsFake = NoteTruthBox.SelectedIndex == 1;
         _session.Document.IsDirty = true;
-        NoteSurface.Invalidate();
+        EditorCanvas.Invalidate();
     }
 
     private void OnNoteWidthChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
@@ -1234,7 +1206,7 @@ public sealed partial class MainWindow : Window
 
         note.Size = e.NewValue;
         _session.Document.IsDirty = true;
-        NoteSurface.Invalidate();
+        EditorCanvas.Invalidate();
     }
 
     private void OnNoteVisibleTimeChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
@@ -1269,7 +1241,7 @@ public sealed partial class MainWindow : Window
 
         note.Alpha = Math.Clamp(e.NewValue, 0, 255);
         _session.Document.IsDirty = true;
-        NoteSurface.Invalidate();
+        EditorCanvas.Invalidate();
     }
 
     private void OnCancelNoteClick(object sender, RoutedEventArgs e)
@@ -1291,7 +1263,7 @@ public sealed partial class MainWindow : Window
         note.Size = _noteEditSnapshot.Size;
         note.VisibleTime = _noteEditSnapshot.VisibleTime;
         note.Alpha = _noteEditSnapshot.Alpha;
-        NoteSurface.Invalidate();
+        EditorCanvas.Invalidate();
         RefreshInspector();
         StatusReadout.Text = "已取消修改";
     }
@@ -1306,7 +1278,7 @@ public sealed partial class MainWindow : Window
 
         _noteEditSnapshot = note.Clone();
         _session.Document.IsDirty = true;
-        NoteSurface.Invalidate();
+        EditorCanvas.Invalidate();
         StatusReadout.Text = "已保存音符";
     }
 
@@ -1349,7 +1321,7 @@ public sealed partial class MainWindow : Window
         }
 
         _session.Document.IsDirty = true;
-        NoteSurface.Invalidate();
+        EditorCanvas.Invalidate();
         StatusReadout.Text = "已更新音符时间";
     }
 
@@ -1389,7 +1361,7 @@ public sealed partial class MainWindow : Window
         }
 
         _session.Document.IsDirty = true;
-        EventSurface.Invalidate();
+        EditorCanvas.Invalidate();
         StatusReadout.Text = "已更新事件时间";
     }
 
@@ -1428,7 +1400,7 @@ public sealed partial class MainWindow : Window
 
         item.Easing = EventEasingBox.SelectedIndex + 1;
         _session.Document.IsDirty = true;
-        EventSurface.Invalidate();
+        EditorCanvas.Invalidate();
         RefreshInspector();
         StatusReadout.Text = "已更新缓动类型";
     }
@@ -1589,7 +1561,7 @@ public sealed partial class MainWindow : Window
 
         item.LinkedGroup = (int)e.NewValue;
         _session.Document.IsDirty = true;
-        EventSurface.Invalidate();
+        EditorCanvas.Invalidate();
     }
 
     private void OnEventValueChanged(object sender, Microsoft.UI.Xaml.Controls.NumberBoxValueChangedEventArgs e)
@@ -1616,7 +1588,7 @@ public sealed partial class MainWindow : Window
         }
 
         _session.Document.IsDirty = true;
-        EventSurface.Invalidate();
+        EditorCanvas.Invalidate();
     }
 
     /// <summary>编辑缓动左右边界。</summary>
@@ -1771,7 +1743,7 @@ public sealed partial class MainWindow : Window
         var before = item.Clone();
         _session.Undo.Push(new DelegateAction(label, () => mutate(item), () => RestoreEvent(item, before)));
         _session.Document.IsDirty = true;
-        EventSurface.Invalidate();
+        EditorCanvas.Invalidate();
         RefreshInspector();
         StatusReadout.Text = label;
     }
@@ -1967,6 +1939,7 @@ public sealed partial class MainWindow : Window
             var text = await FileIO.ReadTextAsync(file);
             var document = RpeJson.Read(text);
             _session.Document = document;
+            _session.CurrentLineIndex = 0;
             _session.Undo.Clear();
             _session.ClearSelection();
             _clock.Reset();

@@ -49,11 +49,11 @@ public static class EventTrackKinds
 
     public static string Key(this EventTrackKind kind) => kind switch
     {
-        EventTrackKind.X => "x",
-        EventTrackKind.Y => "y",
-        EventTrackKind.Rotate => "rotate",
-        EventTrackKind.Alpha => "alpha",
-        EventTrackKind.Speed => "speed",
+        EventTrackKind.X => "moveXEvents",
+        EventTrackKind.Y => "moveYEvents",
+        EventTrackKind.Rotate => "rotateEvents",
+        EventTrackKind.Alpha => "alphaEvents",
+        EventTrackKind.Speed => "speedEvents",
         EventTrackKind.ScaleX => "scaleXEvents",
         EventTrackKind.ScaleY => "scaleYEvents",
         EventTrackKind.Color => "colorEvents",

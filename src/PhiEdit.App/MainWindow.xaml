@@ -23,7 +23,7 @@
                 <TextBlock x:Name="DocumentTitle" Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center"
                            FontSize="13" Foreground="{ThemeResource TextSecondaryBrush}" Text="未命名" />
                 <TextBlock x:Name="BuildVersion" Grid.Column="2" VerticalAlignment="Center" FontSize="12"
-                           Foreground="{ThemeResource TextSecondaryBrush}" Text="v0.1.0" />
+                           Foreground="{ThemeResource TextSecondaryBrush}" Text="v1.0.0" />
             </Grid>
         </Grid>
 
@@ -134,7 +134,7 @@
                         <!-- 未选中任何对象 -->
                         <StackPanel x:Name="EditHintPanel" Padding="14" Spacing="10" Visibility="Collapsed">
                             <TextBlock Text="编辑" Style="{StaticResource SectionTitleStyle}" />
-                            <TextBlock Text="未选中音符或事件。在左侧音符区单击放置音符，在右侧判定线区双击新建事件。"
+                            <TextBlock Text="未选中音符或事件。按 Q/W/E 在指针处放置 Tap/Drag/Flick，按 R 两段式放置 Hold 或事件条。"
                                        Style="{StaticResource StatusTextStyle}" TextWrapping="Wrap" />
                             <TextBlock Text="提示：按住 Shift 拖动可框选，Ctrl+单击可加选，Ctrl+C / Ctrl+V 复制粘贴，Ctrl+M 镜像。"
                                        Style="{StaticResource StatusTextStyle}" TextWrapping="Wrap" />

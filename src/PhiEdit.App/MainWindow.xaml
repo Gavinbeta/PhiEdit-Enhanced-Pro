@@ -165,7 +165,9 @@
                                       Tag="chart" Content="谱面" />
                     </StackPanel>
 
-                    <Grid Grid.Row="1">
+                    <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Auto" VerticalScrollMode="Auto">
+                      <Grid>
                         <!-- 未选中任何对象 -->
                         <StackPanel x:Name="EditHintPanel" Padding="14" Spacing="10" Visibility="Collapsed">
                             <TextBlock Text="编辑" Style="{StaticResource SectionTitleStyle}" />
@@ -191,12 +193,12 @@
                             <StackPanel Spacing="6">
                                 <TextBlock Text="起始拍" Style="{StaticResource FieldLabelStyle}" />
                                 <TextBox x:Name="NoteStartBeatBox" PlaceholderText="整数:分子/分母"
-                                         IsReadOnly="True" />
+                                         LostFocus="OnNoteBeatEdited" />
                             </StackPanel>
-                            <StackPanel Spacing="6">
+                            <StackPanel x:Name="NoteEndBeatPanel" Spacing="6">
                                 <TextBlock Text="结束拍" Style="{StaticResource FieldLabelStyle}" />
                                 <TextBox x:Name="NoteEndBeatBox" PlaceholderText="整数:分子/分母"
-                                         IsReadOnly="True" />
+                                         LostFocus="OnNoteBeatEdited" />
                             </StackPanel>
                             <StackPanel Spacing="6">
                                 <TextBlock Text="横坐标 X" Style="{StaticResource FieldLabelStyle}" />
@@ -291,7 +293,9 @@
                             <TextBlock Text="速度表" Style="{StaticResource SectionTitleStyle}" Margin="0,8,0,0" />
                             <ListView x:Name="BpmList" Height="150" SelectionMode="Single" />
                         </StackPanel>
-                    </Grid>
+                      </Grid>
+                    </ScrollViewer>
+
                 </Grid>
             </Border>
         </Grid>

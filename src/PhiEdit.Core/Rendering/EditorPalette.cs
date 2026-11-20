@@ -71,15 +71,19 @@ public sealed class EditorPalette
 
     public Color NoteDrag { get; set; } = Color.FromArgb(255, 241, 206, 118);
 
-    public Color Selection { get; set; } = Color.FromArgb(255, 255, 255, 255);
+    /// <summary>选中描边颜色（原版 RPE 为绿色）。</summary>
+    public Color Selection { get; set; } = Color.FromArgb(255, 0, 230, 60);
+
+    /// <summary>选中时覆盖在物体上的半透明绿色。</summary>
+    public Color SelectionFill { get; set; } = Color.FromArgb(255, 0, 230, 60);
 
     public Color EventFill { get; set; } = Color.FromArgb(255, 229, 141, 36);
 
     public Color EventStroke { get; set; } = Color.FromArgb(255, 255, 163, 52);
 
-    public Color EventFillSelected { get; set; } = Color.FromArgb(255, 255, 224, 145);
+    public Color EventFillSelected { get; set; } = Color.FromArgb(255, 0, 230, 60);
 
-    public Color EventStrokeSelected { get; set; } = Color.FromArgb(255, 255, 242, 189);
+    public Color EventStrokeSelected { get; set; } = Color.FromArgb(255, 0, 255, 80);
 
     public Color EventFillHooked { get; set; } = Color.FromArgb(255, 98, 216, 242);
 

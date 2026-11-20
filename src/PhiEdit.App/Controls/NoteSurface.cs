@@ -339,16 +339,10 @@ public sealed class NoteSurface : UserControl
             {
                 if (selected)
                 {
-                    // 选中白边：取消选中即消失。
-                    var baseWidth = BaseWidth(scale, note);
-                    var noteWidth = baseWidth * (highlighted ? skin.HighlightScale : 1);
-                    var texture = renderer["click.png"];
-                    var outline = Math.Max(6, noteWidth * (texture?.Size.Height ?? 8) /
-                        Math.Max(1, texture?.Size.Width ?? 1));
-                    drawing.DrawRoundedRectangle(
-                        new Rect(x - (float)noteWidth / 2 - 3, (float)y - (float)outline / 2 - 3,
-                            (float)noteWidth + 6, (float)outline + 6),
-                        6, 6, Palette.Selection.ToWinColor(), 2f);
+                    // 选中特效：绿色描边 + 半透明绿填充，范围与贴图实际区域一致。
+                    var bounds = NoteBounds(renderer, skin, note, x, y, endY, scale, highlighted);
+                    drawing.FillRectangle(bounds, EditorPalette.WithAlpha(Palette.SelectionFill, 90).ToWinColor());
+                    drawing.DrawRectangle(bounds, Palette.Selection.ToWinColor(), 2f);
                 }
 
                 continue;
@@ -372,11 +366,42 @@ public sealed class NoteSurface : UserControl
             drawing.FillRoundedRectangle(new Rect(x - plainWidth / 2, headY, plainWidth, plainHeight), 4, 4, color);
             if (selected)
             {
-                drawing.DrawRoundedRectangle(new Rect(x - plainWidth / 2 - 3, headY - 3, plainWidth + 6, plainHeight + 6), 6, 6,
-                    Palette.Selection.ToWinColor(), 2f);
+                var bounds = new Rect(x - plainWidth / 2 - 3, headY - 3, plainWidth + 6, plainHeight + 6);
+                drawing.FillRectangle(bounds, EditorPalette.WithAlpha(Palette.SelectionFill, 90).ToWinColor());
+                drawing.DrawRectangle(bounds, Palette.Selection.ToWinColor(), 2f);
             }
 
         }
+    }
+
+    /// <summary>
+    /// 音符在屏幕上的实际绘制区域：Hold 覆盖头部到身体的整段，
+    /// 其它音符只有头部。用于选中特效与命中测试。
+    /// </summary>
+    private static Rect NoteBounds(NoteSkinRenderer renderer, NoteSkin skin, Note note, float x,
+        double y, double endY, double scale, bool highlighted)
+    {
+        var baseWidth = BaseWidth(scale, note);
+        var noteWidth = (float)(baseWidth * (highlighted ? skin.HighlightScale : 1));
+
+        if (note.Type == NoteType.Hold)
+        {
+            var bitmap = renderer[highlighted ? "hold_mh.png" : "hold.png"];
+            if (bitmap is not null)
+            {
+                var atlas = highlighted ? skin.Info.HoldAtlasMH : skin.Info.HoldAtlas;
+                var textureScale = noteWidth / bitmap.Size.Width;
+                var headHeight = (float)(atlas[1] * textureScale);
+                var tailHeight = (float)(atlas[0] * textureScale);
+                var top = (float)Math.Min(y, endY);
+                var bottom = (float)Math.Max(y, endY);
+                return new Rect(x - noteWidth / 2, top, noteWidth, Math.Max(headHeight + tailHeight, bottom - top));
+            }
+        }
+
+        var texture = renderer[highlighted ? "click_mh.png" : "click.png"];
+        var height = noteWidth * (texture?.Size.Height ?? 8) / Math.Max(1, texture?.Size.Width ?? 1);
+        return new Rect(x - noteWidth / 2, (float)y - height / 2, noteWidth, height);
     }
 
     /// <summary>使用资源包贴图绘制音符；缺少贴图时返回 false 以退回纯色绘制。</summary>
@@ -772,9 +797,28 @@ public sealed class NoteSurface : UserControl
         foreach (var note in _session.CurrentLine.Notes)
         {
             var noteY = viewport.YAtBeat(note.StartBeat.Value);
+            var noteEndY = viewport.YAtBeat(note.EndBeat.Value);
             var noteX = viewport.StageXToPixel(note.PositionX);
             var noteWidth = BaseWidth(scale, note);
-            if (Math.Abs(noteY - y) <= 9 && Math.Abs(noteX - x) <= noteWidth / 2 + 2)
+            if (Math.Abs(noteX - x) > noteWidth / 2 + 2)
+            {
+                continue;
+            }
+
+            if (note.Type == NoteType.Hold)
+            {
+                // Hold 的贴图任意位置（头部到身体）都应能命中并拖动。
+                var top = Math.Min(noteY, noteEndY);
+                var bottom = Math.Max(noteY, noteEndY);
+                if (y >= top - 6 && y <= bottom + 6)
+                {
+                    return note;
+                }
+
+                continue;
+            }
+
+            if (Math.Abs(noteY - y) <= 9)
             {
                 return note;
             }

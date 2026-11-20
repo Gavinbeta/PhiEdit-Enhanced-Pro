@@ -58,8 +58,10 @@ public sealed partial class MainWindow : Window
         EventSurface.Palette = _palette;
 
         NoteSurface.SkinLoadFailed += (_, message) => StatusReadout.Text = message;
-        NoteSurface.SelectionChanged += (_, _) => RefreshInspector();
-        EventSurface.SelectionChanged += (_, _) => RefreshInspector();
+        // 选择变化时两侧都要重绘：否则另一侧会残留旧的选中高亮，
+        // 看起来像是「音符和事件同时被选中」。
+        NoteSurface.SelectionChanged += (_, _) => OnSelectionChanged();
+        EventSurface.SelectionChanged += (_, _) => OnSelectionChanged();
         _session.Viewport.ViewChanged += (_, _) => OnViewChanged();
         Scrubber.ValueChanged += (sender, args) => OnScrubberChanged(sender, args);
         EditorSplitter.Dragged += (_, delta) => ApplyEditorSplit(delta);
@@ -126,6 +128,10 @@ public sealed partial class MainWindow : Window
         {
             editor.PlaceNote(line, type, Beat.FromValue(beat), x);
         }
+
+        // Hold 样例：带长度的音符，身体整体可点击、可拖动
+        var hold = editor.PlaceNote(line, NoteType.Hold, Beat.FromValue(3.75), 200);
+        hold.EndBeat = Beat.FromValue(4.5);
 
         // 起点 4:1/2、终点 5:1/2 的事件应绘制成覆盖整段的长条
         editor.AddEvent(line, EventTrackKind.X, 0, Beat.FromValue(4.5), -120, 60, Beat.FromValue(5.5));
@@ -593,6 +599,15 @@ public sealed partial class MainWindow : Window
 
     // ---------------------------------------------------------------- 刷新
 
+    /// <summary>选择变化：刷新属性面板并让两个编辑区同时重绘。</summary>
+    private void OnSelectionChanged()
+    {
+        RefreshInspector();
+        NoteSurface.Invalidate();
+        EventSurface.Invalidate();
+    }
+
+
     /// <summary>
     /// 纵向位置（视口唯一真源）变化时的统一响应：
     /// 同步播放头位置、刷新底栏读数，并让两个编辑区同时重绘。
@@ -697,6 +712,8 @@ public sealed partial class MainWindow : Window
             NoteTypeBox.SelectedIndex = (int)note.Type - 1;
             NoteStartBeatBox.Text = note.StartBeat.ToString();
             NoteEndBeatBox.Text = note.EndBeat.ToString();
+            // 只有 Hold 是有长度的音符，其余为瞬时音符，不显示结束拍。
+            NoteEndBeatPanel.Visibility = note.Type == NoteType.Hold ? Visibility.Visible : Visibility.Collapsed;
             NotePositionXBox.Value = note.PositionX;
             NotePositionYBox.Value = note.PositionY;
         }
@@ -1013,6 +1030,42 @@ public sealed partial class MainWindow : Window
         note.PositionY = e.NewValue;
         _session.Document.IsDirty = true;
         NoteSurface.Invalidate();
+    }
+
+    /// <summary>编辑音符的起止拍。</summary>
+    private void OnNoteBeatEdited(object sender, RoutedEventArgs e)
+    {
+        var note = _session.SelectedNotes.FirstOrDefault();
+        if (note is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(NoteStartBeatBox.Text))
+            {
+                var start = Beat.Parse(NoteStartBeatBox.Text);
+                var delta = start.Value - note.StartBeat.Value;
+                note.StartBeat = start;
+                note.EndBeat = Beat.FromValue(note.EndBeat.Value + delta);
+            }
+
+            if (note.Type == NoteType.Hold && !string.IsNullOrWhiteSpace(NoteEndBeatBox.Text))
+            {
+                note.EndBeat = Beat.Parse(NoteEndBeatBox.Text);
+            }
+        }
+        catch (FormatException exception)
+        {
+            StatusReadout.Text = $"拍格式不正确：{exception.Message}";
+            RefreshInspector();
+            return;
+        }
+
+        _session.Document.IsDirty = true;
+        NoteSurface.Invalidate();
+        StatusReadout.Text = "已更新音符时间";
     }
 
     /// <summary>编辑事件的起止拍。</summary>

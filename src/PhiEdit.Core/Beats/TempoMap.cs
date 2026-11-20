@@ -46,14 +46,42 @@ public sealed class TempoMap
     public static TempoMap Default { get; } = new(new[] { new TempoPoint(Beat.Zero, 120) });
 
     /// <summary>拍 → 秒。</summary>
-    public double SecondsAt(double beat)
+    public double SecondsAt(double beat) => SecondsAt(beat, 1);
+
+    /// <summary>
+    /// 拍 → 秒，并应用判定线的 bpmfactor。与参考源码 tempo.seconds(beat, factor) 一致。
+    /// </summary>
+    public double SecondsAt(double beat, double factor)
+    {
+        if (!(factor > 0) || !double.IsFinite(factor))
+        {
+            factor = 1;
+        }
+
+        return SecondsAtCore(beat) * factor;
+    }
+
+    private double SecondsAtCore(double beat)
     {
         var index = IndexForBeat(beat);
         return _cumulativeSeconds[index] + (beat - _points[index].StartBeat.Value) * _points[index].SecondsPerBeat;
     }
 
     /// <summary>秒 → 拍。</summary>
-    public double BeatAt(double seconds)
+    public double BeatAt(double seconds) => BeatAt(seconds, 1);
+
+    /// <summary>秒 → 拍，并应用判定线的 bpmfactor。</summary>
+    public double BeatAt(double seconds, double factor)
+    {
+        if (!(factor > 0) || !double.IsFinite(factor))
+        {
+            factor = 1;
+        }
+
+        return BeatAtCore(seconds / factor);
+    }
+
+    private double BeatAtCore(double seconds)
     {
         var index = 0;
         for (var i = 0; i < _points.Count; i++)

@@ -39,6 +39,8 @@
   <ItemGroup>
     <!-- 内置音符资源包：随程序分发，可在设置页查看与切换 -->
     <Content Include="Assets\NoteSkins\*.zip" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 原版默认 RPE 贴图：实时预览层按参考源码还原时使用 -->
+    <Content Include="Assets\RpeTextures\*.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

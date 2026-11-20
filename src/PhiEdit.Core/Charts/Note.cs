@@ -40,6 +40,9 @@ public sealed class Note
     /// <summary>透明度（0–255）。</summary>
     public double Alpha { get; set; } = 255;
 
+    /// <summary>音符自身颜色覆盖（RGB，0–255）。</summary>
+    public double[]? Color { get; set; }
+
     /// <summary>音效素材相对路径。</summary>
     public string? HitSound { get; set; }
 
@@ -83,6 +86,12 @@ public sealed class LineEvent
 
     /// <summary>缓动采样右边界，1 表示到曲线终点结束。</summary>
     public double EasingRight { get; set; } = 1;
+
+    /// <summary>是否使用贝塞尔缓动。</summary>
+    public bool Bezier { get; set; }
+
+    /// <summary>贝塞尔控制点 [x1,y1,x2,y2]。</summary>
+    public double[] BezierPoints { get; set; } = { 0, 0, 1, 1 };
 
     /// <summary>被同组事件共享（联动）的标识。</summary>
     public int LinkedGroup { get; set; }

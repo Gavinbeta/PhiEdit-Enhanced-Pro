@@ -53,8 +53,7 @@ public sealed partial class MainWindow : Window
 
         NoteSurface.SelectionChanged += (_, _) => RefreshInspector();
         EventSurface.SelectionChanged += (_, _) => RefreshInspector();
-        NoteSurface.ViewChanged += (_, _) => OnViewChanged();
-        EventSurface.ViewChanged += (_, _) => OnViewChanged();
+        _session.Viewport.ViewChanged += (_, _) => OnViewChanged();
         Scrubber.ValueChanged += (sender, args) => OnScrubberChanged(sender, args);
         EditorSplitter.Dragged += (_, delta) => ApplyEditorSplit(delta);
         InspectorSplitter.Dragged += (_, delta) => ApplyInspectorSplit(delta);
@@ -117,7 +116,7 @@ public sealed partial class MainWindow : Window
 
         _session.Undo.Clear();
         document.IsDirty = false;
-        _session.Viewport.ScrollToBeat(2.5);
+        _session.Viewport.SetPosition(2.5);
         _clock.SeekToBeat(2.5);
     }
 
@@ -209,14 +208,16 @@ public sealed partial class MainWindow : Window
     // ---------------------------------------------------------------- 刷新
 
     /// <summary>
-    /// 任一编辑区滚动或缩放时，两个编辑区同时重绘，保证始终同步。
-    /// 判定线（播放头）固定在底部，因此视口锚点即为播放头位置，滚动等同于定位播放头。
+    /// 纵向位置（视口唯一真源）变化时的统一响应：
+    /// 同步播放头位置、刷新底栏读数，并让两个编辑区同时重绘。
+    /// 滚轮、缩放、底部进度条、播放推进等所有入口最终都只修改视口位置，
+    /// 因此两侧永远同步，不存在某一侧滞后的情况。
     /// </summary>
     private void OnViewChanged()
     {
         if (!_clock.IsPlaying)
         {
-            _clock.SeekToBeat(_session.Viewport.AnchorBeat);
+            _clock.SeekToBeat(_session.Viewport.Position);
         }
 
         RefreshTimeline();
@@ -245,8 +246,6 @@ public sealed partial class MainWindow : Window
         if (!_clock.IsPlaying)
         {
             Scrubber.Value = Math.Clamp(_clock.CurrentBeat, Scrubber.Minimum, Scrubber.Maximum);
-            // 未播放时视口锚点与播放头位置保持一致。
-            _session.Viewport.AnchorBeat = Math.Max(0, _clock.CurrentBeat);
         }
 
         TimeReadout.Text = $"{_clock.CurrentSeconds:0.00}s / {tempo.DurationToBeat(_session.Document.LastBeat):0.00}s";
@@ -354,8 +353,8 @@ public sealed partial class MainWindow : Window
 
         _clock.Advance(0);
         var beat = _clock.CurrentBeat;
-        // 判定线固定在底部，播放时视口锚定播放头，内容自上而下流动。
-        _session.Viewport.AnchorBeat = Math.Max(0, beat);
+        // 判定线固定在底部，播放时视口位置跟随播放头，内容自上而下流动。
+        _session.Viewport.SetPosition(beat);
         Scrubber.Value = Math.Clamp(beat, Scrubber.Minimum, Scrubber.Maximum);
         RefreshTimeline();
     }
@@ -489,7 +488,8 @@ public sealed partial class MainWindow : Window
         }
 
         _clock.SeekToBeat(value);
-        _session.Viewport.ScrollToBeat(value);
+        // 纵向位置唯一真源：进度条只改它，其余刷新由视口事件驱动。
+        _session.Viewport.SetPosition(value);
         RefreshTimeline();
     }
 

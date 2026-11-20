@@ -30,7 +30,7 @@ public sealed class EditViewport
     public double ViewportHeight { get; set; } = 600;
 
     /// <summary>判定线距画布底部的距离，保留一条可以看到「已过」音符的窄带。</summary>
-    public double PlayheadInset { get; set; } = 26;
+    public double PlayheadInset { get; set; } = 88;
 
     /// <summary>判定线（播放头）所在的屏幕纵坐标。</summary>
     public double PlayheadY => Math.Max(0, ViewportHeight - PlayheadInset);

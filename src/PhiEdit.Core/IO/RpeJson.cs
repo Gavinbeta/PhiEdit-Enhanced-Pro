@@ -210,6 +210,7 @@ public static class RpeJson
         if (line.Layers.Count > 0)
         {
             var layerObject = new JsonObject();
+            JsonObject? extended = null;
             foreach (var layer in line.Layers)
             {
                 var tracks = new JsonObject();
@@ -235,10 +236,24 @@ public static class RpeJson
                     tracks[track.Key.Key()] = array;
                 }
 
+                if (layer.Key == JudgeLine.SpecialLayer)
+                {
+                    extended = tracks;
+                    continue;
+                }
+
                 layerObject[layer.Key.ToString(CultureInfo.InvariantCulture)] = tracks;
             }
 
-            node["eventLayers"] = layerObject;
+            if (layerObject.Count > 0)
+            {
+                node["eventLayers"] = layerObject;
+            }
+
+            if (extended is not null)
+            {
+                node["extended"] = extended;
+            }
         }
 
         return node;
@@ -303,11 +318,16 @@ public static class RpeJson
             }
         }
 
+        if (element.TryGetProperty("extended", out var extended) && extended.ValueKind == JsonValueKind.Object)
+        {
+            ReadEventLayer(line, extended, JudgeLine.SpecialLayer);
+        }
+
         if (element.TryGetProperty("eventLayers", out var layerObject) && layerObject.ValueKind == JsonValueKind.Object)
         {
             foreach (var layerProperty in layerObject.EnumerateObject())
             {
-                if (!int.TryParse(layerProperty.Name, out var layerIndex))
+                if (!int.TryParse(layerProperty.Name, out var layerIndex) || layerIndex == JudgeLine.SpecialLayer)
                 {
                     continue;
                 }
@@ -317,23 +337,28 @@ public static class RpeJson
                     continue;
                 }
 
-                foreach (var trackProperty in layerProperty.Value.EnumerateObject())
-                {
-                    var kind = EventTrackKinds.FromKey(trackProperty.Name);
-                    if (kind is null || trackProperty.Value.ValueKind != JsonValueKind.Array)
-                    {
-                        continue;
-                    }
-
-                    foreach (var eventElement in trackProperty.Value.EnumerateArray())
-                    {
-                        line.AddEvent(ReadEvent(eventElement, kind.Value, layerIndex));
-                    }
-                }
+                ReadEventLayer(line, layerProperty.Value, layerIndex);
             }
         }
 
         return line;
+    }
+
+    private static void ReadEventLayer(JudgeLine line, JsonElement layer, int layerIndex)
+    {
+        foreach (var trackProperty in layer.EnumerateObject())
+        {
+            var kind = EventTrackKinds.FromKey(trackProperty.Name);
+            if (kind is null || trackProperty.Value.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var eventElement in trackProperty.Value.EnumerateArray())
+            {
+                line.AddEvent(ReadEvent(eventElement, kind.Value, layerIndex));
+            }
+        }
     }
 
     private static LineEvent ReadEvent(JsonElement element, EventTrackKind kind, int layer)

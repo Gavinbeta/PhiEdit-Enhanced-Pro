@@ -64,6 +64,30 @@ public class RpeJsonTests
     }
 
     [Fact]
+    public void WriteThenRead_PreservesSpecialEventLayer()
+    {
+        var chart = new ChartDocument();
+        var line = chart.AddLine();
+        line.AddEvent(new LineEvent
+        {
+            Kind = EventTrackKind.Alpha,
+            Layer = JudgeLine.SpecialLayer,
+            StartBeat = Beat.FromValue(1),
+            EndBeat = Beat.FromValue(2),
+            StartValue = 0,
+            EndValue = 255,
+        });
+
+        var json = RpeJson.Write(chart);
+        Assert.Contains("\"extended\"", json);
+
+        var restored = RpeJson.Read(json);
+        var extended = restored.Lines[0].Track(EventTrackKind.Alpha, JudgeLine.SpecialLayer);
+        Assert.Single(extended);
+        Assert.Equal(255, extended[0].EndValue, 6);
+    }
+
+    [Fact]
     public void Read_ToleratesMissingFields()
     {
         var chart = RpeJson.Read("{\"judgeLineList\":[{\"notes\":[{\"type\":1}]}]}");

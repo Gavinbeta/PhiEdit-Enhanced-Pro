@@ -93,7 +93,7 @@ public sealed class EditorPalette
     public Color SelectionFill { get; set; } = Color.FromArgb(255, 0, 230, 60);
 
     /// <summary>事件条内缓动曲线颜色（原版为橙色细线）。</summary>
-    public Color EventCurve { get; set; } = Color.FromArgb(255, 255, 224, 163);
+    public Color EventCurve { get; set; } = Color.FromArgb(255, 255, 140, 24);
 
     public Color EventFill { get; set; } = Color.FromArgb(255, 229, 141, 36);
 

@@ -57,7 +57,7 @@ public sealed class EventCurveGraph : UserControl
         var top = 16f;
         var bottom = (float)Math.Max(top + 30, height - 46);
         var axis = Windows.UI.Color.FromArgb(255, 226, 232, 240);
-        var curve = Windows.UI.Color.FromArgb(255, 255, 190, 60);
+        var curve = Windows.UI.Color.FromArgb(255, 255, 140, 24);
         var green = Windows.UI.Color.FromArgb(255, 60, 220, 90);
 
         // 坐标轴与箭头

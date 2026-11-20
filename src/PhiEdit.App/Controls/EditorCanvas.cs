@@ -215,31 +215,32 @@ public sealed class EditorCanvas : UserControl
         var playheadY = viewport.PlayheadY;
         DrawTimeGrid(drawing, session, viewport, 0, layout.LeftWidth, playheadY,
             layout.LeftWidth + GutterWidth / 2);
-        DrawVerticalGrid(drawing, session, 0, layout.LeftWidth, playheadY);
+        DrawVerticalGrid(drawing, session.GridCount, 0, layout.LeftWidth, playheadY);
         DrawNotes(drawing, session, viewport, 0, layout.LeftWidth, height);
 
         DrawTimeGrid(drawing, session, viewport, layout.RightLeft, layout.RightWidth, playheadY,
             width - 14);
-        DrawVerticalGrid(drawing, session, layout.RightLeft, layout.RightWidth, playheadY);
+        DrawVerticalGrid(drawing, 6, layout.RightLeft, layout.RightWidth, playheadY);
         DrawEvents(drawing, session, viewport, layout.RightLeft, layout.RightWidth, height);
         DrawHeader(drawing, layout.RightLeft, layout.RightWidth);
-        DrawFooter(drawing, session, layout.RightLeft, layout.RightWidth, height);
 
         DrawPlayhead(drawing, 0, layout.LeftWidth, playheadY);
         DrawPlayhead(drawing, layout.RightLeft, layout.RightWidth, playheadY);
+        DrawEventValues(drawing, session, layout.RightLeft, layout.RightWidth, playheadY);
         DrawMarquee(drawing);
     }
 
-    private void DrawVerticalGrid(CanvasDrawingSession drawing, EditorSession session,
+    private void DrawVerticalGrid(CanvasDrawingSession drawing, int count,
         double left, double width, double playheadY)
     {
+        var grid = new VerticalGrid(count);
         var gridTop = (float)Palette.GridInsetTop;
         // 竖线一直画到判定线；灰线会盖住它压在判定线上的部分。
         var gridBottom = (float)Math.Max(gridTop, playheadY);
         var gridLeft = left + Palette.GridInsetX;
         var gridRight = left + width - Palette.GridInsetX;
         var span = Math.Max(1, gridRight - gridLeft);
-        foreach (var stageX in session.Grid.Lines())
+        foreach (var stageX in grid.Lines())
         {
             var x = (float)(gridLeft + (stageX + VerticalGrid.StageHalfWidth) / VerticalGrid.StageWidth * span);
             if (x < gridLeft - 2 || x > gridRight + 2)
@@ -248,7 +249,7 @@ public sealed class EditorCanvas : UserControl
             }
 
             var center = Math.Abs(stageX) < 1e-6;
-            var strokeWidth = center && session.Grid.HasCenterLine ? Palette.VerticalCenterWidth : Palette.VerticalWidth;
+            var strokeWidth = center && grid.HasCenterLine ? Palette.VerticalCenterWidth : Palette.VerticalWidth;
             drawing.DrawLine(x, gridTop, x, gridBottom,
                 EditorPalette.WithAlpha(Palette.VerticalLine, Palette.VerticalAlpha).ToWinColor(), strokeWidth);
         }
@@ -320,7 +321,7 @@ public sealed class EditorCanvas : UserControl
         var gridWidth = (float)Math.Max(1, width - Palette.GridInsetX * 2);
         drawing.FillRectangle(new Rect(gridLeft, 0, gridWidth, (float)HeaderHeight),
             Palette.EventHeaderBackground.ToWinColor());
-        var format = CanvasExtensions.TextFormat(12f);
+        var format = CanvasExtensions.TextFormat(16f, bold: true);
         var channelWidth = ChannelWidth(width);
         for (var channel = 0; channel < Tracks.Count; channel++)
         {
@@ -330,26 +331,24 @@ public sealed class EditorCanvas : UserControl
         }
     }
 
-    private void DrawFooter(CanvasDrawingSession drawing, EditorSession session, double left, double width, double height)
+    /// <summary>判定线数值：只显示数字，绿色粗体，中心压在灰线上，绘制在事件条上层。</summary>
+    private void DrawEventValues(CanvasDrawingSession drawing, EditorSession session,
+        double left, double width, double playheadY)
     {
-        var top = (float)(height - FooterHeight);
-        var gridLeft = (float)(left + Palette.GridInsetX);
-        var gridWidth = (float)Math.Max(1, width - Palette.GridInsetX * 2);
-        drawing.FillRectangle(new Rect(gridLeft, top, gridWidth, (float)FooterHeight),
-            Palette.EventHeaderBackground.ToWinColor());
-
         var line = session.CurrentLine;
         var beat = session.Viewport.Position;
+        var gridLeft = left + Palette.GridInsetX;
         var channelWidth = ChannelWidth(width);
-        var format = CanvasExtensions.TextFormat(13f, center: true);
+        var format = CanvasExtensions.TextFormat(24f, center: true, bold: true);
+        var valueColor = Windows.UI.Color.FromArgb(255, 60, 230, 90);
+
         for (var channel = 0; channel < Tracks.Count; channel++)
         {
             var kind = Tracks[channel];
             var value = line is null ? 0 : CurrentValue(line, kind, session.CurrentLayer, beat);
-            var color = value < 0 ? Palette.EventValueBottom : Palette.EventValueTop;
-            drawing.DrawText(kind.FormatValue(value),
-                new Vector2(gridLeft + (float)(channel * channelWidth + channelWidth / 2), top + 5),
-                color.ToWinColor(), format);
+            drawing.DrawText(value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
+                new Vector2((float)(gridLeft + channel * channelWidth + channelWidth / 2),
+                    (float)(playheadY - 15)), valueColor, format);
         }
     }
 
@@ -635,8 +634,12 @@ public sealed class EditorCanvas : UserControl
                 var rectBottom = (float)Math.Min(height, bottom);
                 var rectHeight = Math.Max(2f, rectBottom - rectTop);
                 var selected = session.SelectedEvents.Contains(item);
-                var fillTop = Windows.UI.Color.FromArgb(210, 112, 231, 226);
-                var fillBottom = Windows.UI.Color.FromArgb(210, 236, 182, 218);
+                var fillTop = selected
+                    ? Windows.UI.Color.FromArgb(220, 76, 232, 108)
+                    : Windows.UI.Color.FromArgb(210, 112, 231, 226);
+                var fillBottom = selected
+                    ? Windows.UI.Color.FromArgb(220, 24, 196, 72)
+                    : Windows.UI.Color.FromArgb(210, 236, 182, 218);
                 using var gradient = new CanvasLinearGradientBrush(drawing, fillTop, fillBottom)
                 {
                     StartPoint = new Vector2((float)(barX + barWidth / 2), rectTop),

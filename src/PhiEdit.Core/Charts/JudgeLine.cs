@@ -8,6 +8,9 @@ namespace PhiEdit.Core.Charts;
 /// </summary>
 public sealed class JudgeLine
 {
+    /// <summary>RPE 特殊事件层在内部使用层号 4，对应文件中的 extended。</summary>
+    public const int SpecialLayer = 4;
+
     public int Id { get; init; }
 
     /// <summary>判定线编号（用于线号列表显示）。</summary>

@@ -103,6 +103,10 @@
                         <ComboBox x:Name="LineSelector" MinWidth="130" SelectionChanged="OnLineSelectionChanged" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="10,0,0,0">
+                        <TextBlock Text="事件层" Style="{StaticResource StatusTextStyle}" />
+                        <StackPanel x:Name="LayerButtons" Orientation="Horizontal" Spacing="2" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" Margin="10,0,0,0">
                         <TextBlock Text="每拍细分数" Style="{StaticResource StatusTextStyle}" />
                         <NumberBox x:Name="DivisionBox" Width="76" Minimum="1" Maximum="32" SpinButtonPlacementMode="Hidden"
                                    ValueChanged="OnDivisionChanged" />

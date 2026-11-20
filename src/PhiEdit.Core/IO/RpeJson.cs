@@ -49,6 +49,7 @@ public static class RpeJson
             ChartName = GetString(metaElement, "charter") ?? GetString(root, "chartName") ?? "Default",
             Difficulty = GetString(metaElement, "level") ?? GetString(root, "difficulty") ?? string.Empty,
             SongFilename = GetString(metaElement, "song") ?? GetString(root, "songFilename") ?? string.Empty,
+            Background = GetString(metaElement, "background") ?? string.Empty,
             SongDuration = hasMeta ? 0 : GetDouble(root, "songDuration"),
             RpeVersion = (int)GetDouble(metaElement, "RPEVersion", GetDouble(root, "RPEVersion", 170)),
             RawRoot = JsonNode.Parse(text) as JsonObject,
@@ -103,7 +104,7 @@ public static class RpeJson
             ["illustration"] = string.Empty,
             ["level"] = chart.Difficulty,
             ["song"] = chart.SongFilename,
-            ["background"] = string.Empty,
+            ["background"] = chart.Background,
             ["offset"] = 0,
         };
 
@@ -182,6 +183,14 @@ public static class RpeJson
             if (note.Color is { Length: 3 })
             {
                 noteNode["color"] = new JsonArray(note.Color[0], note.Color[1], note.Color[2]);
+            }
+            if (note.Tint is { Length: 3 })
+            {
+                noteNode["tint"] = new JsonArray(note.Tint[0], note.Tint[1], note.Tint[2]);
+            }
+            if (note.TintHitEffects is { Length: 3 })
+            {
+                noteNode["tintHitEffects"] = new JsonArray(note.TintHitEffects[0], note.TintHitEffects[1], note.TintHitEffects[2]);
             }
             noteArray.Add(noteNode);
         }
@@ -404,6 +413,8 @@ public static class RpeJson
                     VisibleTime = GetDouble(noteElement, "visibleTime", GetDouble(noteElement, "visualTime", 999999)),
                     Alpha = GetDouble(noteElement, "alpha", 255),
                     Color = ReadRgb(noteElement, "color"),
+                    Tint = ReadRgb(noteElement, "tint"),
+                    TintHitEffects = ReadRgb(noteElement, "tintHitEffects"),
                     RawNode = JsonNode.Parse(noteElement.GetRawText()) as JsonObject,
                 });
             }

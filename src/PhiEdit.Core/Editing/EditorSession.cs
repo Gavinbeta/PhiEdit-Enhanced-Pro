@@ -1,4 +1,5 @@
 using PhiEdit.Core.Charts;
+using PhiEdit.Core.IO;
 using PhiEdit.Core.Layout;
 using PhiEdit.Core.Skins;
 
@@ -31,6 +32,9 @@ public sealed class EditorSession
     public NoteSkinLibrary Skins { get; } = new();
 
     public EditViewport Viewport { get; }
+
+    /// <summary>当前谱面同目录或 PEZ 包内的资源，用于背景与自定义线贴图。</summary>
+    public ChartAssetStore Assets { get; set; } = new();
 
     /// <summary>每拍细分数：相邻整拍线之间的细线数量。</summary>
     public int Division { get; set; } = 4;

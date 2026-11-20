@@ -108,6 +108,8 @@ public sealed class LineRuntime
 
     public IReadOnlyList<NoteEntry> Notes => _notes;
 
+    public bool HasScaleYEvents => AllEvents(EventTrackKind.ScaleY).Any();
+
     public double Floor(double seconds) => _speeds.Sum(speed => speed.Distance(seconds));
 
     public LineState State(double seconds)

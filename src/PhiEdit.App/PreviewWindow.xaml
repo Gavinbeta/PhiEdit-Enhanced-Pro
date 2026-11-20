@@ -12,6 +12,14 @@
                 <Button x:Name="StopButton" Width="72" Click="OnStopClick" Content="回到开头" />
                 <TextBlock x:Name="TimeReadout" Text="0.000 s" FontSize="13" Foreground="#FFD8E0EC"
                            VerticalAlignment="Center" MinWidth="150" />
+                <Slider x:Name="SeekSlider" Width="180" Minimum="0" Maximum="60" SmallChange="0.1"
+                        ValueChanged="OnSeekSliderChanged" VerticalAlignment="Center" />
+                <ComboBox x:Name="RateBox" Width="72" SelectedIndex="1" SelectionChanged="OnRateChanged"
+                          VerticalAlignment="Center">
+                    <ComboBoxItem Content="0.5x" />
+                    <ComboBoxItem Content="1.0x" />
+                    <ComboBoxItem Content="2.0x" />
+                </ComboBox>
                 <CheckBox x:Name="FollowEditorCheck" Content="跟随编辑位置" IsChecked="True"
                           Foreground="#FFD8E0EC" VerticalAlignment="Center" />
                 <TextBlock Text="预览始终显示整份谱面的所有判定线；音频播放接口已预留。"

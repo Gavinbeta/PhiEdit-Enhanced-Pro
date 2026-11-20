@@ -870,6 +870,7 @@ public sealed partial class MainWindow : Window
     private void OnNewClick(object sender, RoutedEventArgs e)
     {
         _session.Document = new ChartDocument();
+        _session.Assets = new ChartAssetStore();
         _session.Document.AddLine();
         _session.CurrentLineIndex = 0;
         _currentFilePath = null;
@@ -1944,6 +1945,8 @@ public sealed partial class MainWindow : Window
         var picker = new FileOpenPicker();
         picker.FileTypeFilter.Add(".json");
         picker.FileTypeFilter.Add(".pec");
+        picker.FileTypeFilter.Add(".pez");
+        picker.FileTypeFilter.Add(".zip");
         InitializeWithWindow.Initialize(picker, GetWindowHandle());
         var file = await picker.PickSingleFileAsync();
         if (file is null)
@@ -1953,9 +1956,34 @@ public sealed partial class MainWindow : Window
 
         try
         {
-            var text = await FileIO.ReadTextAsync(file);
+            ChartAssetStore assets;
+            string text;
+            var extension = Path.GetExtension(file.Path).ToLowerInvariant();
+            if (extension is ".pez" or ".zip")
+            {
+                var archive = File.ReadAllBytes(file.Path);
+                assets = ChartAssetStore.FromZip(archive);
+                var chartName = assets.Names.FirstOrDefault(name =>
+                    name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ||
+                    name.EndsWith(".pec", StringComparison.OrdinalIgnoreCase));
+                var chartBytes = chartName is null ? null : assets.Resolve(chartName);
+                if (chartBytes is null)
+                {
+                    StatusReadout.Text = "打开失败：压缩包内没有谱面 JSON";
+                    return;
+                }
+
+                text = System.Text.Encoding.UTF8.GetString(chartBytes);
+            }
+            else
+            {
+                text = await FileIO.ReadTextAsync(file);
+                assets = ChartAssetStore.FromDirectory(Path.GetDirectoryName(file.Path) ?? string.Empty);
+            }
+
             var document = RpeJson.Read(text);
             _session.Document = document;
+            _session.Assets = assets;
             _session.CurrentLineIndex = 0;
             _session.Undo.Clear();
             _session.ClearSelection();

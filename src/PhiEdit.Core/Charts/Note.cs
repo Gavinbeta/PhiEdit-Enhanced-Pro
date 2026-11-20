@@ -43,6 +43,12 @@ public sealed class Note
     /// <summary>音符自身颜色覆盖（RGB，0–255）。</summary>
     public double[]? Color { get; set; }
 
+    /// <summary>原版 note.tint，优先于 color。</summary>
+    public double[]? Tint { get; set; }
+
+    /// <summary>打击特效染色（RGB，0–255）。</summary>
+    public double[]? TintHitEffects { get; set; }
+
     /// <summary>音效素材相对路径。</summary>
     public string? HitSound { get; set; }
 

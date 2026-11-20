@@ -20,6 +20,9 @@ public sealed class ChartDocument
 
     public double SongDuration { get; set; }
 
+    /// <summary>背景图资源名，来自 META.background。</summary>
+    public string Background { get; set; } = "";
+
     /// <summary>文件格式版本，写出时使用。</summary>
     public int RpeVersion { get; set; } = 240;
 

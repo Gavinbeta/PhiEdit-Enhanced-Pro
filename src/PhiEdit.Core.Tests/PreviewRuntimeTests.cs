@@ -63,6 +63,37 @@ public class PreviewRuntimeTests
     }
 
     [Fact]
+    public void VisibleNotes_StillReturnsNotes_WhenLineAlphaIsZero()
+    {
+        var chart = new ChartDocument();
+        var line = chart.AddLine();
+        line.AddEvent(new LineEvent
+        {
+            Kind = EventTrackKind.Alpha,
+            StartBeat = Beat.Zero,
+            EndBeat = Beat.FromValue(100),
+            StartValue = 0,
+            EndValue = 0,
+        });
+        line.AddEvent(new LineEvent
+        {
+            Kind = EventTrackKind.Speed,
+            StartBeat = Beat.Zero,
+            EndBeat = Beat.FromValue(100),
+            StartValue = 10,
+            EndValue = 10,
+        });
+        var note = new Note { Type = NoteType.Tap, StartBeat = Beat.FromValue(4), PositionX = 0 };
+        note.EndBeat = note.StartBeat;
+        line.Notes.Add(note);
+        var runtime = new LineRuntime(line, chart.BuildTempoMap());
+        var state = runtime.State(chart.BuildTempoMap().SecondsAt(2));
+
+        Assert.Equal(0, state.Alpha, 6);
+        Assert.NotEmpty(runtime.VisibleNotes(chart.BuildTempoMap().SecondsAt(2), state, 1e9));
+    }
+
+    [Fact]
     public void SpeedIntegral_AppliesReferenceUnitScale()
     {
         var chart = new ChartDocument();

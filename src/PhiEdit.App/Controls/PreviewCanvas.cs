@@ -374,7 +374,10 @@ public sealed class PreviewCanvas : UserControl
 
             var runtime = _scene.Lines[index];
             var state = states[index];
-            if (state.Alpha <= 0 || state.ScaleX == 0 || state.ScaleY == 0)
+            // 参考 preview.mjs drawPass：只有线 pass 会因线透明度/缩放/attachUI 跳过；
+            // 音符与 Hold pass 仍然要绘制，否则线淡出时音符会一起消失。
+            if (pass == PassKind.Line &&
+                (runtime.Line.AttachUI || state.Alpha <= 0 || state.ScaleX == 0 || state.ScaleY == 0))
             {
                 continue;
             }

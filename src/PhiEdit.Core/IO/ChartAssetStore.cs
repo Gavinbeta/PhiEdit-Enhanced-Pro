@@ -10,7 +10,21 @@ namespace PhiEdit.Core.IO;
 /// </summary>
 public sealed class ChartAssetStore
 {
+    public const int MaxFiles = 20000;
+    public const long MaxBytes = 1024L * 1024 * 1024;
+    public const long MaxFileBytes = 512L * 1024 * 1024;
+    public const double MaxCompressionRatio = 500;
+
+    private static readonly HashSet<string> AllowedExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".json", ".pec", ".pez", ".zip", ".txt", ".yml", ".yaml",
+        ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif",
+        ".ogg", ".mp3", ".wav",
+    };
+
     private readonly Dictionary<string, byte[]> _files = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<string>> _byFileName = new(StringComparer.OrdinalIgnoreCase);
+    private long _totalBytes;
 
     public static ChartAssetStore Empty { get; } = new();
 
@@ -30,25 +44,62 @@ public sealed class ChartAssetStore
         }
 
         var fileName = Path.GetFileName(normalized);
-        if (_files.TryGetValue(fileName, out var byName))
+        if (_byFileName.TryGetValue(fileName, out var candidates))
         {
-            return byName;
+            if (candidates.Count == 1)
+            {
+                return _files[candidates[0]];
+            }
+
+            var relative = _files.Keys.FirstOrDefault(name => name.EndsWith("/" + fileName, StringComparison.OrdinalIgnoreCase) ||
+                                                              name.Equals(fileName, StringComparison.OrdinalIgnoreCase));
+            return relative is null ? null : _files[relative];
         }
 
-        var matches = _files.Where(pair => pair.Key.EndsWith("/" + fileName, StringComparison.OrdinalIgnoreCase)).ToList();
-        return matches.Count == 1 ? matches[0].Value : null;
+        return null;
     }
 
     public void Add(string name, byte[] bytes)
     {
         var normalized = Normalize(name);
-        if (normalized.Length > 0)
+        if (normalized.Length == 0 || bytes.LongLength > MaxFileBytes)
         {
-            _files[normalized] = bytes;
+            return;
+        }
+
+        if (!_files.TryGetValue(normalized, out var previous))
+        {
+            if (_files.Count >= MaxFiles || _totalBytes + bytes.LongLength > MaxBytes)
+            {
+                return;
+            }
+
+            _totalBytes += bytes.LongLength;
+        }
+        else
+        {
+            _totalBytes += bytes.LongLength - previous.LongLength;
+        }
+
+        _files[normalized] = bytes;
+        var fileName = Path.GetFileName(normalized);
+        if (!_byFileName.TryGetValue(fileName, out var candidates))
+        {
+            candidates = new List<string>();
+            _byFileName[fileName] = candidates;
+        }
+        if (!candidates.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+        {
+            candidates.Add(normalized);
         }
     }
 
-    public void Clear() => _files.Clear();
+    public void Clear()
+    {
+        _files.Clear();
+        _byFileName.Clear();
+        _totalBytes = 0;
+    }
 
     /// <summary>
     /// 按原版优先级寻找背景：META.background → info.txt 的 Picture → 目录内唯一图片。
@@ -105,9 +156,25 @@ public sealed class ChartAssetStore
 
         foreach (var path in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
         {
+            if (!AllowedExtensions.Contains(Path.GetExtension(path)))
+            {
+                continue;
+            }
+
             var name = Path.GetRelativePath(directory, path).Replace('\\', '/');
+            if (name.Count(character => character == '/') >= 6)
+            {
+                continue;
+            }
+
             try
             {
+                var info = new FileInfo(path);
+                if (info.Length > MaxFileBytes || store._totalBytes + info.Length > MaxBytes)
+                {
+                    continue;
+                }
+
                 store.Add(name, File.ReadAllBytes(path));
             }
             catch (IOException)
@@ -127,13 +194,16 @@ public sealed class ChartAssetStore
         var store = new ChartAssetStore();
         using var stream = new MemoryStream(bytes, writable: false);
         using var zip = new ZipArchive(stream, ZipArchiveMode.Read);
-        foreach (var entry in zip.Entries)
+        var entries = zip.Entries.Where(entry => !entry.FullName.EndsWith('/')).ToList();
+        if (entries.Count > MaxFiles || entries.Sum(entry => entry.Length) > MaxBytes ||
+            entries.Any(entry => entry.Length > MaxFileBytes) ||
+            entries.Any(entry => entry.CompressedLength > 0 && entry.Length / (double)entry.CompressedLength > MaxCompressionRatio))
         {
-            if (entry.FullName.EndsWith('/'))
-            {
-                continue;
-            }
+            throw new InvalidDataException("PEZ/ZIP 资源超出安全限制。");
+        }
 
+        foreach (var entry in entries)
+        {
             using var source = entry.Open();
             using var buffer = new MemoryStream();
             source.CopyTo(buffer);

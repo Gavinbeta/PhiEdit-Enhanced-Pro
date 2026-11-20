@@ -46,10 +46,14 @@ public sealed class EventTrack
             return Fallback;
         }
 
+        if (_cursor >= _events.Count)
+        {
+            _cursor = _events.Count - 1;
+        }
+
         var current = _events[_cursor];
         var next = _cursor + 1 < _events.Count ? _events[_cursor + 1] : null;
         if (!double.IsFinite(seconds) ||
-            (!double.IsFinite(current.Start) && _cursor == 0) ||
             (seconds < current.Start && _cursor != 0) ||
             (next is not null && seconds >= next.Start))
         {

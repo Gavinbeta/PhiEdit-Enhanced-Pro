@@ -38,6 +38,12 @@ public sealed record NoteEntry(
     double Floor,
     double Tail);
 
+/// <summary>一次打击特效触发。</summary>
+public sealed record HitMoment(NoteEntry Entry, double Time, int Seed)
+{
+    public const double HoldInterval = 20.0 / 120.0;
+}
+
 /// <summary>
 /// 单条判定线的运行时状态计算。移植自参考源码 core/scene.mjs 的 LineRuntime。
 /// </summary>
@@ -62,9 +68,14 @@ public sealed class LineRuntime
     private readonly ControlCurve _skewControl;
     private readonly ControlCurve _yControl;
     private readonly List<NoteEntry> _notes;
+    private readonly IntervalIndex<NoteEntry> _index;
+    private readonly IntervalIndex<NoteEntry> _staticIndex;
+    private readonly IntervalIndex<NoteEntry> _holdIndex;
+    private readonly IReadOnlyList<NoteEntry> _hitTimes;
     private readonly double _minSpeed;
     private readonly bool _hasYControl;
     private readonly bool _hasAlphaEvents;
+    private readonly bool[] _legacyAlpha;
 
     public LineRuntime(JudgeLine line, TempoMap tempo)
     {
@@ -77,6 +88,7 @@ public sealed class LineRuntime
         _rotateTracks = StandardTracks(EventTrackKind.Rotate, 0);
         _alphaTracks = StandardTracks(EventTrackKind.Alpha, 0);
         _hasAlphaEvents = _alphaTracks.Any(track => track.HasEvents);
+        _legacyAlpha = _alphaTracks.Select(track => track.IsLegacyAlpha).ToArray();
         _speeds = Layers().Select(layer => new SpeedIntegral(EventsOf(layer, EventTrackKind.Speed), tempo, _factor)).ToList();
         if (_speeds.Count == 0)
         {
@@ -102,6 +114,19 @@ public sealed class LineRuntime
         _yControl = new ControlCurve(line.YControl, "y");
 
         _notes = line.Notes.Select((note, index) => NoteEntry(note, index)).ToList();
+        _index = new IntervalIndex<NoteEntry>(
+            _notes.Where(entry => entry.Note.Speed != 0),
+            entry => Math.Min(entry.Floor, entry.Tail),
+            entry => Math.Max(entry.Floor, entry.Tail));
+        _staticIndex = new IntervalIndex<NoteEntry>(
+            _notes.Where(entry => entry.Note.Speed == 0),
+            entry => entry.Start - (entry.Note.VisibleTime > 0 ? entry.Note.VisibleTime : 999999),
+            entry => entry.End);
+        _holdIndex = new IntervalIndex<NoteEntry>(
+            _notes.Where(entry => entry.Note.Type == NoteType.Hold),
+            entry => entry.Start,
+            entry => entry.End);
+        _hitTimes = _notes.OrderBy(entry => entry.Start).ToList();
         _minSpeed = _notes.Aggregate(1.0, (minimum, entry) => Math.Min(minimum, Math.Abs(entry.Note.Speed == 0 ? 1 : entry.Note.Speed)));
         _hasYControl = line.YControl.Count > 1 && line.YControl.Any(point => Math.Abs(point.Y - 1) > 1e-6);
     }
@@ -123,7 +148,8 @@ public sealed class LineRuntime
         // 参考 scene.mjs：判定线 alpha 只由 alphaEvents 求和得到；
         // 没有事件时才沿用判定线的基础 alpha，兼容本程序早期写出的谱面。
         var alpha = _hasAlphaEvents
-            ? _alphaTracks.Sum(track => track.Number(seconds) * (track.IsLegacyAlpha ? 255 : 1))
+            ? _alphaTracks.Select((track, index) =>
+                track.Number(seconds) * (_legacyAlpha[index] ? 255 : 1)).Sum()
             : _line.Alpha * 255;
         var colorValue = _color.Value(seconds);
         var color = colorValue as double[] ?? (EventTrack.ToDouble(colorValue) is var gray && gray != 0
@@ -150,28 +176,91 @@ public sealed class LineRuntime
         }
 
         var reach = radius / Math.Max(0.01, _minSpeed);
-        return _notes.Where(entry =>
+        var entries = _hasYControl
+            ? (IEnumerable<NoteEntry>)_notes
+            : _index.Query(state.Floor - reach, state.Floor + reach)
+                .Select(item => item.Item)
+                .Concat(_staticIndex.Query(seconds, seconds)
+                    .OrderBy(item => item.Index)
+                    .Select(item => item.Item));
+
+        return entries.Where(entry => IsVisible(entry, seconds, state)).ToList();
+    }
+
+    private bool IsVisible(NoteEntry entry, double seconds, LineState state)
+    {
+        if (entry.End < seconds ||
+            entry.Start - seconds > (entry.Note.VisibleTime > 0 ? entry.Note.VisibleTime : 999999))
         {
-            if (entry.End < seconds || entry.Start - seconds > (entry.Note.VisibleTime > 0 ? entry.Note.VisibleTime : 999999))
+            return false;
+        }
+
+        return !(_line.IsCover == 1 && entry.Note.Speed != 0 &&
+                 (entry.Note.Type == NoteType.Hold ? entry.Tail : entry.Floor) < state.Floor);
+    }
+
+    /// <summary>
+    /// 参考 core/hit-effects.mjs recentHits：只取时间窗内的音符与 Hold 脉冲。
+    /// </summary>
+    public IReadOnlyList<HitMoment> RecentHits(double seconds, double lifetime = 2.0 / 3.0, double since = double.NegativeInfinity)
+    {
+        var lower = Math.Max(seconds - lifetime, since);
+        var result = new List<HitMoment>();
+
+        if (double.IsFinite(lower))
+        {
+            var first = UpperBound(_hitTimes, lower, entry => entry.Start);
+            var last = UpperBound(_hitTimes, seconds, entry => entry.Start);
+            for (var index = first; index < last; index++)
             {
-                return false;
+                var entry = _hitTimes[index];
+                if (entry.Note.Type != NoteType.Hold && !entry.Note.IsFake)
+                {
+                    result.Add(new HitMoment(entry, entry.Start, index));
+                }
+            }
+        }
+
+        foreach (var item in _holdIndex.Query(seconds - lifetime, seconds))
+        {
+            var entry = item.Item;
+            if (entry.Note.IsFake)
+            {
+                continue;
             }
 
-            if (_hasYControl)
+            var firstPulse = Math.Max(0,
+                (int)Math.Floor((Math.Max(seconds - lifetime, since) - entry.Start) / HitMoment.HoldInterval) + 1);
+            var lastPulse = Math.Min(
+                (int)Math.Floor((seconds - entry.Start) / HitMoment.HoldInterval),
+                (int)Math.Ceiling((entry.End - entry.Start) / HitMoment.HoldInterval) - 1);
+            for (var pulse = firstPulse; pulse <= lastPulse; pulse++)
             {
-                return true;
+                result.Add(new HitMoment(entry, entry.Start + pulse * HitMoment.HoldInterval, item.Index * 65537 + pulse));
             }
+        }
 
-            var lo = Math.Min(entry.Floor, entry.Tail);
-            var hi = Math.Max(entry.Floor, entry.Tail);
-            if (hi < state.Floor - reach || lo > state.Floor + reach)
+        return result;
+    }
+
+    private static int UpperBound<T>(IReadOnlyList<T> values, double value, Func<T, double> selector)
+    {
+        var low = 0;
+        var high = values.Count;
+        while (low < high)
+        {
+            var middle = (low + high) / 2;
+            if (value < selector(values[middle]))
             {
-                return false;
+                high = middle;
             }
+            else
+            {
+                low = middle + 1;
+            }
+        }
 
-            return !(_line.IsCover == 1 && entry.Note.Speed != 0 &&
-                     (entry.Note.Type == NoteType.Hold ? entry.Tail : entry.Floor) < state.Floor);
-        }).OrderBy(entry => entry.Start).ToList();
+        return low;
     }
 
     public NoteState NoteState(NoteEntry entry, LineState state, double seconds)
@@ -310,11 +399,13 @@ public sealed class SceneRuntime
 
             if (!resolving.Add(index))
             {
-                return null;
+                // 与参考 scene.mjs 一致：父线成环时返回当前线已应用 positionScale 的局部状态。
+                return states[index];
             }
 
             var state = Lines[index].State(seconds);
             state = state with { X = state.X * scaleX, Y = state.Y * scaleY };
+            states[index] = state;
             var father = Lines[index].Line.Father;
             if (father >= 0 && father < Lines.Count)
             {
@@ -343,9 +434,14 @@ public sealed class SceneRuntime
         for (var index = 0; index < Lines.Count; index++)
         {
             Resolve(index);
+            if (states[index] is null)
+            {
+                var local = Lines[index].State(seconds);
+                states[index] = local with { X = local.X * scaleX, Y = local.Y * scaleY };
+            }
         }
 
-        return states.Select(state => state ?? Lines[0].State(seconds)).ToList();
+        return states.Select(state => state!).ToList();
     }
 }
 

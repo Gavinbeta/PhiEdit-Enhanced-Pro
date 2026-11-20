@@ -1,9 +1,11 @@
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Effects;
+using Microsoft.Graphics.Canvas.Text;
 using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using PhiEdit.App.Services;
+using PhiEdit.Core.Beats;
 using PhiEdit.Core.Charts;
 using PhiEdit.Core.Editing;
 using PhiEdit.Core.IO;
@@ -27,7 +29,6 @@ public sealed class PreviewCanvas : UserControl
     private const double StageHeight = 900;
     private const double HitFrameSeconds = 0.015;
     private const int HitFrameCount = 31;
-    private const double HoldHitInterval = 20.0 / 120.0;
 
     private readonly CanvasControl _canvas = new()
     {
@@ -38,12 +39,18 @@ public sealed class PreviewCanvas : UserControl
     private readonly SceneRuntime _scene = new();
     private readonly RpeTextureRenderer _textures = new();
     private readonly NoteSkinRenderer _packRenderer = new();
+    private readonly TintedBitmapCache _tintCache = new();
+    private readonly Dictionary<(string Text, int Size), CanvasTextLayout> _textLayouts = new();
     private readonly Dictionary<string, CanvasBitmap> _assetTextures = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _loadingTextures = new(StringComparer.OrdinalIgnoreCase);
     private EditorSession? _session;
     private IPreviewTimeSource? _clock;
+    private ICanvasResourceCreator? _creator;
     private string? _loadedPackId;
     private bool _packLoading;
+    private ChartDocument? _tempoDocument;
+    private TempoMap? _tempoMap;
+    private string? _tempoSignature;
     private CanvasBitmap? _background;
     private GaussianBlurEffect? _backgroundEffect;
     private string? _backgroundKey;
@@ -51,6 +58,9 @@ public sealed class PreviewCanvas : UserControl
     private ChartAssetStore? _backgroundAssets;
     private bool _backgroundLoading;
     private bool _backgroundResolved;
+    private long _backgroundGeneration;
+    private long _packGeneration;
+    private long _assetGeneration;
     private bool _loading;
 
     public PreviewCanvas()
@@ -83,6 +93,12 @@ public sealed class PreviewCanvas : UserControl
             _backgroundResolved = false;
             _backgroundDocument = null;
             _backgroundAssets = null;
+            InvalidateGenerations();
+            foreach (var bitmap in _assetTextures.Values)
+            {
+                bitmap.Dispose();
+            }
+            _assetTextures.Clear();
             _scene.MarkDirty();
             Invalidate();
         }
@@ -98,6 +114,16 @@ public sealed class PreviewCanvas : UserControl
         }
     }
 
+    private void InvalidateGenerations()
+    {
+        _backgroundGeneration++;
+        _packGeneration++;
+        _assetGeneration++;
+        _backgroundLoading = false;
+        _packLoading = false;
+        _loadingTextures.Clear();
+    }
+
     public void Invalidate() => _canvas.Invalidate();
 
     /// <summary>窗口关闭时释放该窗口设备上的位图与效果。</summary>
@@ -109,6 +135,12 @@ public sealed class PreviewCanvas : UserControl
         _background = null;
         _textures.Reset();
         _packRenderer.Reset();
+        _tintCache.Reset();
+        foreach (var layout in _textLayouts.Values)
+        {
+            layout.Dispose();
+        }
+        _textLayouts.Clear();
         foreach (var bitmap in _assetTextures.Values)
         {
             bitmap.Dispose();
@@ -121,6 +153,10 @@ public sealed class PreviewCanvas : UserControl
         _scene.MarkDirty();
         _backgroundDocument = null;
         _backgroundResolved = false;
+        _backgroundGeneration++;
+        _backgroundLoading = false;
+        _assetGeneration++;
+        _loadingTextures.Clear();
         Invalidate();
     }
 
@@ -128,6 +164,8 @@ public sealed class PreviewCanvas : UserControl
     {
         _packRenderer.Reset();
         _loadedPackId = null;
+        _packGeneration++;
+        _packLoading = false;
         Invalidate();
     }
 
@@ -148,15 +186,23 @@ public sealed class PreviewCanvas : UserControl
         }
 
         _packLoading = true;
-        _ = LoadPackAsync(creator, skin);
+        var token = ++_packGeneration;
+        _ = LoadPackAsync(creator, skin, token);
     }
 
-    private async Task LoadPackAsync(ICanvasResourceCreator creator, NoteSkin skin)
+    private async Task LoadPackAsync(ICanvasResourceCreator creator, NoteSkin skin, long token)
     {
         try
         {
             _packRenderer.Reset();
             await _packRenderer.ApplyAsync(creator, skin);
+            if (token != _packGeneration || !ReferenceEquals(skin, _session?.Skins.Active))
+            {
+                _packRenderer.Reset();
+                _loadedPackId = null;
+                return;
+            }
+
             _loadedPackId = skin.Id;
             Invalidate();
         }
@@ -166,7 +212,10 @@ public sealed class PreviewCanvas : UserControl
         }
         finally
         {
-            _packLoading = false;
+            if (token == _packGeneration)
+            {
+                _packLoading = false;
+            }
         }
     }
 
@@ -209,29 +258,46 @@ public sealed class PreviewCanvas : UserControl
 
         _backgroundKey = name;
         _backgroundLoading = true;
-        _ = LoadBackgroundAsync(creator, bytes, name);
+        var token = ++_backgroundGeneration;
+        _ = LoadBackgroundAsync(creator, bytes, name, token);
     }
 
-    private async Task LoadBackgroundAsync(ICanvasResourceCreator creator, byte[] bytes, string name)
+    private async Task LoadBackgroundAsync(ICanvasResourceCreator creator, byte[] bytes, string name, long token)
     {
+        CanvasBitmap? loaded = null;
+        GaussianBlurEffect? effect = null;
         try
         {
             using var stream = new MemoryStream(bytes, writable: false);
             using var random = stream.AsRandomAccessStream();
+            loaded = await CanvasBitmap.LoadAsync(creator, random);
+            effect = new GaussianBlurEffect { Source = loaded, BlurAmount = 10.5f };
+            if (token != _backgroundGeneration)
+            {
+                effect.Dispose();
+                loaded.Dispose();
+                return;
+            }
+
             _background?.Dispose();
             _backgroundEffect?.Dispose();
-            _background = await CanvasBitmap.LoadAsync(creator, random);
-            _backgroundEffect = new GaussianBlurEffect { Source = _background, BlurAmount = 10.5f };
+            _background = loaded;
+            _backgroundEffect = effect;
             Invalidate();
         }
         catch
         {
-            _background = null;
-            _backgroundEffect = null;
+            effect?.Dispose();
+            loaded?.Dispose();
+            if (token == _backgroundGeneration)
+            {
+                _background = null;
+                _backgroundEffect = null;
+            }
         }
         finally
         {
-            if (_backgroundKey == name)
+            if (token == _backgroundGeneration)
             {
                 _backgroundLoading = false;
             }
@@ -252,26 +318,51 @@ public sealed class PreviewCanvas : UserControl
             return;
         }
 
-        _ = LoadLineTextureAsync(creator, name, bytes);
+        var token = _assetGeneration;
+        _ = LoadLineTextureAsync(creator, name, bytes, token);
     }
 
-    private async Task LoadLineTextureAsync(ICanvasResourceCreator creator, string name, byte[] bytes)
+    private async Task LoadLineTextureAsync(ICanvasResourceCreator creator, string name, byte[] bytes, long token)
     {
+        CanvasBitmap? loaded = null;
         try
         {
             using var stream = new MemoryStream(bytes, writable: false);
             using var random = stream.AsRandomAccessStream();
-            _assetTextures[name] = await CanvasBitmap.LoadAsync(creator, random);
+            loaded = await CanvasBitmap.LoadAsync(creator, random);
+            if (token != _assetGeneration)
+            {
+                loaded.Dispose();
+                return;
+            }
+
+            _assetTextures[name] = loaded;
             Invalidate();
         }
         catch
         {
-            // 无法解码的贴图按默认线处理。
+            loaded?.Dispose();
         }
         finally
         {
             _loadingTextures.Remove(name);
         }
+    }
+
+    private TempoMap GetTempo(ChartDocument document)
+    {
+        var signature = string.Join(';', document.BpmList.Select(point =>
+            $"{point.StartBeat.Value:R}:{point.Bpm:R}"));
+        if (_tempoMap is not null && ReferenceEquals(_tempoDocument, document) && _tempoSignature == signature)
+        {
+            return _tempoMap;
+        }
+
+        _tempoDocument = document;
+        _tempoSignature = signature;
+        _tempoMap = document.BuildTempoMap();
+        _scene.MarkDirty();
+        return _tempoMap;
     }
 
     private void OnDraw(CanvasControl sender, CanvasDrawEventArgs args)
@@ -282,6 +373,7 @@ public sealed class PreviewCanvas : UserControl
             return;
         }
 
+        _creator = sender;
         var width = (float)Math.Max(1, sender.ActualWidth);
         var height = (float)Math.Max(1, sender.ActualHeight);
         var drawing = args.DrawingSession;
@@ -321,7 +413,7 @@ public sealed class PreviewCanvas : UserControl
             new Rect(viewport.Left, viewport.Top, viewport.Width, viewport.Height),
             Windows.UI.Color.FromArgb(255, 84, 96, 116));
 
-        var tempo = session.Document.BuildTempoMap();
+        var tempo = GetTempo(session.Document);
         _scene.Compile(session.Document, tempo);
         var seconds = _clock?.CurrentSeconds ?? tempo.SecondsAt(session.Viewport.Position);
         var states = _scene.Sample(seconds, PreviewViewport.PositionScale());
@@ -395,7 +487,7 @@ public sealed class PreviewCanvas : UserControl
             {
                 if (!visibleCache.TryGetValue(index, out var entries))
                 {
-                    entries = runtime.VisibleNotes(seconds, state, 2000 / Math.Max(0.01, Math.Abs(runtime.Line.Speed)));
+                    entries = runtime.VisibleNotes(seconds, state, 1600);
                     visibleCache[index] = entries;
                 }
 
@@ -512,21 +604,36 @@ public sealed class PreviewCanvas : UserControl
         DrawTinted(drawing, bitmap, destination, new Rect(0, 0, bitmap.Size.Width, bitmap.Size.Height), lineColor, alpha);
     }
 
-    private static void DrawLineText(CanvasDrawingSession drawing, string text, JudgeLine line,
+    private void DrawLineText(CanvasDrawingSession drawing, string text, JudgeLine line,
         float centerX, float centerY, float scale, Windows.UI.Color color, float alpha)
     {
-        var lines = text.Replace("\r\n", "\n").Split('\n');
-        var fontSize = (float)(52 * scale);
-        var lineHeight = fontSize * 1.25f;
-        var maxWidth = lines.Max(value => value.Length) * fontSize * 0.55f;
-        var blockHeight = lines.Length * lineHeight;
-        var left = centerX - maxWidth * (float)line.AnchorX;
-        var top = centerY - blockHeight * (float)(1 - line.AnchorY);
-        var format = CanvasExtensions.TextFormat(fontSize);
-        for (var index = 0; index < lines.Length; index++)
+        if (_creator is null)
         {
-            drawing.DrawText(lines[index], new Vector2(left, top + index * lineHeight), WithAlpha(color, alpha), format);
+            return;
         }
+
+        var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+        var size = Math.Max(1, (int)Math.Round(52 * scale));
+        var key = (normalized, size);
+        if (!_textLayouts.TryGetValue(key, out var layout))
+        {
+            if (_textLayouts.Count >= 128)
+            {
+                foreach (var old in _textLayouts.Values)
+                {
+                    old.Dispose();
+                }
+                _textLayouts.Clear();
+            }
+
+            layout = new CanvasTextLayout(_creator, normalized, CanvasExtensions.TextFormat(size), 10000, 10000);
+            _textLayouts[key] = layout;
+        }
+
+        var bounds = layout.LayoutBounds;
+        var left = centerX - (float)(bounds.Width * line.AnchorX);
+        var top = centerY - (float)(bounds.Height * (1 - line.AnchorY));
+        drawing.DrawTextLayout(layout, new Vector2(left, top), WithAlpha(color, alpha));
     }
 
     private void DrawNote(CanvasDrawingSession drawing, Note note, float centerX, float headY, float tailY,
@@ -683,13 +790,16 @@ public sealed class PreviewCanvas : UserControl
     {
         var defaultTint = new[] { 255.0, 236.0, 160.0 };
         var pack = _packRenderer.IsReady ? _packRenderer.Skin : null;
+        var positionScale = PreviewViewport.PositionScale();
+        const double lifetime = 2.0 / 3.0;
         var samples = new Dictionary<long, IReadOnlyList<LineState>>();
+
         IReadOnlyList<LineState> SampleAt(double time)
         {
             var key = (long)Math.Round(time * 1_000_000);
             if (!samples.TryGetValue(key, out var result))
             {
-                result = _scene.Sample(time);
+                result = _scene.Sample(time, positionScale);
                 samples[key] = result;
             }
 
@@ -704,128 +814,102 @@ public sealed class PreviewCanvas : UserControl
             }
 
             var runtime = _scene.Lines[index];
-            foreach (var entry in runtime.Notes)
+            foreach (var hit in runtime.RecentHits(seconds, lifetime))
             {
-                if (entry.End < seconds - 2.0 / 3.0 || entry.Start > seconds)
+                var entry = hit.Entry;
+                var time = hit.Time;
+                var age = seconds - time;
+                if (age < 0 || age >= lifetime)
                 {
                     continue;
                 }
 
-                foreach (var time in HitTimes(entry))
+                var hitStates = SampleAt(time);
+                if (index >= hitStates.Count)
                 {
-                    var age = seconds - time;
-                    if (age < 0 || age >= 2.0 / 3.0)
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    var hitStates = SampleAt(time);
-                    if (index >= hitStates.Count)
-                    {
-                        continue;
-                    }
+                var hitState = hitStates[index];
+                var position = runtime.NoteState(entry, hitState, time);
+                var angle = hitState.Rotation * Math.PI / 180;
+                var worldX = hitState.X + position.X * Math.Cos(angle) + position.Y * Math.Sin(angle);
+                var worldY = -hitState.Y + position.X * Math.Sin(angle) - position.Y * Math.Cos(angle);
+                var x = originX + (float)(worldX * scale);
+                var y = originY + (float)(worldY * scale);
+                var size = (float)(LogicalNoteSize * 1.4 * scale);
+                var tint = entry.Note.TintHitEffects ?? defaultTint;
+                var hitBitmap = _packRenderer["hit_fx.png"];
+                if (pack is not null && hitBitmap is not null)
+                {
+                    var perfect = pack.Info.ColorPerfect;
+                    var perfectRgb = new[] { (double)((perfect >> 16) & 0xFF), (double)((perfect >> 8) & 0xFF), (double)(perfect & 0xFF) };
+                    tint = pack.Info.HitFxTinted ? entry.Note.TintHitEffects ?? perfectRgb : new double[] { 255, 255, 255 };
+                }
 
-                    var hitState = hitStates[index];
-                    var position = runtime.NoteState(entry, hitState, time);
-                    var angle = hitState.Rotation * Math.PI / 180;
-                    var worldX = hitState.X + position.X * Math.Cos(angle) + position.Y * Math.Sin(angle);
-                    var worldY = -hitState.Y + position.X * Math.Sin(angle) - position.Y * Math.Cos(angle);
-                    var x = originX + (float)(worldX * scale);
-                    var y = originY + (float)(worldY * scale);
-                    var size = (float)(LogicalNoteSize * 1.4 * scale);
-                    var tint = entry.Note.TintHitEffects ?? defaultTint;
-                    var hitBitmap = _packRenderer["hit_fx.png"];
+                if (age < (pack?.Info.HitFxDuration ?? HitFrameSeconds * HitFrameCount))
+                {
+                    var old = drawing.Transform;
                     if (pack is not null && hitBitmap is not null)
                     {
-                        var perfect = pack.Info.ColorPerfect;
-                        var perfectRgb = new[] { (double)((perfect >> 16) & 0xFF), (double)((perfect >> 8) & 0xFF), (double)(perfect & 0xFF) };
-                        tint = pack.Info.HitFxTinted ? entry.Note.TintHitEffects ?? perfectRgb : new double[] { 255, 255, 255 };
-                    }
-
-                    if (age < (pack?.Info.HitFxDuration ?? HitFrameSeconds * HitFrameCount))
-                    {
-                        var old = drawing.Transform;
-                        if (pack is not null && hitBitmap is not null)
+                        var columns = Math.Max(1, pack.Info.HitFx[0]);
+                        var rows = Math.Max(1, pack.Info.HitFx[1]);
+                        var total = columns * rows;
+                        var progress = Math.Clamp(age / Math.Max(0.001, pack.Info.HitFxDuration), 0, 0.9999);
+                        var frameIndex = Math.Min(total - 1, (int)Math.Floor(progress * total));
+                        var frameWidth = hitBitmap.Size.Width / columns;
+                        var frameHeight = hitBitmap.Size.Height / rows;
+                        var effectSize = (float)(size * pack.Info.HitFxScale);
+                        var source = new Rect(frameIndex % columns * frameWidth, frameIndex / columns * frameHeight, frameWidth, frameHeight);
+                        var hitRect = new Rect(x - effectSize / 2, y - effectSize * (float)(frameHeight / frameWidth) / 2,
+                            effectSize, effectSize * (float)(frameHeight / frameWidth));
+                        if (InViewport(hitRect, viewport))
                         {
-                            var columns = Math.Max(1, pack.Info.HitFx[0]);
-                            var rows = Math.Max(1, pack.Info.HitFx[1]);
-                            var total = columns * rows;
-                            var progress = Math.Clamp(age / Math.Max(0.001, pack.Info.HitFxDuration), 0, 0.9999);
-                            var frameIndex = Math.Min(total - 1, (int)Math.Floor(progress * total));
-                            var frameWidth = hitBitmap.Size.Width / columns;
-                            var frameHeight = hitBitmap.Size.Height / rows;
-                            var effectSize = (float)(size * pack.Info.HitFxScale);
-                            var source = new Rect(frameIndex % columns * frameWidth, frameIndex / columns * frameHeight, frameWidth, frameHeight);
-                            var hitRect = new Rect(x - effectSize / 2, y - effectSize * (float)(frameHeight / frameWidth) / 2,
-                                effectSize, effectSize * (float)(frameHeight / frameWidth));
-                            if (InViewport(hitRect, viewport))
+                            if (pack.Info.HitFxRotate)
                             {
-                                if (pack.Info.HitFxRotate)
-                                {
-                                    drawing.Transform = Matrix3x2.CreateRotation((float)angle, new Vector2(x, y)) * old;
-                                }
+                                drawing.Transform = Matrix3x2.CreateRotation((float)angle, new Vector2(x, y)) * old;
+                            }
 
-                                var envelope = progress < 0.5 ? 1 - progress * 0.6 : 1.4 * (1 - progress);
-                                DrawTinted(drawing, hitBitmap, hitRect, source, tint, (float)Math.Clamp(envelope, 0, 1));
+                            var envelope = progress < 0.5 ? 1 - progress * 0.6 : 1.4 * (1 - progress);
+                            DrawTinted(drawing, hitBitmap, hitRect, source, tint, (float)Math.Clamp(envelope, 0, 1));
+                            drawing.Transform = old;
+                        }
+                    }
+                    else
+                    {
+                        var frame = Math.Min(HitFrameCount, (int)Math.Floor(age / HitFrameSeconds) + 1);
+                        var bitmap = _textures[$"img-{frame}.png"];
+                        if (bitmap is not null)
+                        {
+                            var destination = new Rect(x - size / 2, y - size / 2, size, size);
+                            if (InViewport(destination, viewport))
+                            {
+                                drawing.Transform = Matrix3x2.CreateRotation((float)angle, new Vector2(x, y)) * old;
+                                DrawTinted(drawing, bitmap, destination,
+                                    new Rect(0, 0, bitmap.Size.Width, bitmap.Size.Height), tint, 1);
                                 drawing.Transform = old;
                             }
                         }
-                        else
-                        {
-                            var frame = Math.Min(HitFrameCount, (int)Math.Floor(age / HitFrameSeconds) + 1);
-                            var bitmap = _textures[$"img-{frame}.png"];
-                            if (bitmap is not null)
-                            {
-                                var destination = new Rect(x - size / 2, y - size / 2, size, size);
-                                if (InViewport(destination, viewport))
-                                {
-                                    drawing.Transform = Matrix3x2.CreateRotation((float)angle, new Vector2(x, y)) * old;
-                                    DrawTinted(drawing, bitmap, destination,
-                                        new Rect(0, 0, bitmap.Size.Width, bitmap.Size.Height), tint, 1);
-                                    drawing.Transform = old;
-                                }
-                            }
-                        }
-                    }
-
-                    if (pack?.Info.HideParticles == true)
-                    {
-                        continue;
-                    }
-
-                    var seed = index * 65537 + entry.Index;
-                    var amount = EasingMath.Curve(16, Math.Clamp(age * 1.5, 0, 1));
-                    for (var particle = 0; particle < 4; particle++)
-                    {
-                        var random = Math.Sin(seed * 12.9898 + particle * 78.233) * 43758.5453;
-                        var particleAngle = (random - Math.Floor(random)) * Math.PI * 2;
-                        var px = x + (float)(Math.Cos(particleAngle) * size * 1.1 * amount);
-                        var py = y + (float)(Math.Sin(particleAngle) * size * 1.1 * amount);
-                        var radius = (float)(size * 0.075 * amount);
-                        drawing.FillRectangle(new Rect(px - radius, py - radius, radius * 2, radius * 2),
-                            WithAlpha(Rgb(tint), (float)Math.Max(0, 1 - age * 1.5)));
                     }
                 }
+
+                if (pack?.Info.HideParticles == true)
+                {
+                    continue;
+                }
+
+                var amount = EasingMath.Curve(16, Math.Clamp(age * 1.5, 0, 1));
+                for (var particle = 0; particle < 4; particle++)
+                {
+                    var random = Math.Sin(hit.Seed * 12.9898 + particle * 78.233) * 43758.5453;
+                    var particleAngle = (random - Math.Floor(random)) * Math.PI * 2;
+                    var px = x + (float)(Math.Cos(particleAngle) * size * 1.1 * amount);
+                    var py = y + (float)(Math.Sin(particleAngle) * size * 1.1 * amount);
+                    var radius = (float)(size * 0.075 * amount);
+                    drawing.FillRectangle(new Rect(px - radius, py - radius, radius * 2, radius * 2),
+                        WithAlpha(Rgb(tint), (float)Math.Max(0, 1 - age * 1.5)));
+                }
             }
-        }
-    }
-
-    private static IEnumerable<double> HitTimes(NoteEntry entry)
-    {
-        if (entry.Note.Type != NoteType.Hold)
-        {
-            yield return entry.Start;
-            yield break;
-        }
-
-        for (var time = entry.Start; time <= entry.End + 1e-9; time += HoldHitInterval)
-        {
-            yield return time;
-        }
-
-        if (entry.End - entry.Start > 1e-9 && Math.Abs((entry.End - entry.Start) % HoldHitInterval) > 1e-9)
-        {
-            yield return entry.End;
         }
     }
 
@@ -840,7 +924,7 @@ public sealed class PreviewCanvas : UserControl
         _ => new[] { 138.0, 203.0, 255.0 },
     };
 
-    private static void DrawTinted(CanvasDrawingSession drawing, CanvasBitmap bitmap, Rect destination, Rect source,
+    private void DrawTinted(CanvasDrawingSession drawing, CanvasBitmap bitmap, Rect destination, Rect source,
         IReadOnlyList<double>? color, float opacity)
     {
         if (color is null || color.Count < 3 || color.All(value => Math.Abs(value - 255) < 1e-6) || opacity <= 0)
@@ -849,15 +933,15 @@ public sealed class PreviewCanvas : UserControl
             return;
         }
 
-        var matrix = new Matrix5x4
+        if (_creator is null)
         {
-            M11 = (float)(Math.Clamp(color[0], 0, 255) / 255),
-            M22 = (float)(Math.Clamp(color[1], 0, 255) / 255),
-            M33 = (float)(Math.Clamp(color[2], 0, 255) / 255),
-            M44 = 1,
-        };
-        var effect = new ColorMatrixEffect { Source = bitmap, ColorMatrix = matrix };
-        drawing.DrawImage(effect, destination, source, opacity);
+            drawing.DrawImage(bitmap, destination, source, opacity);
+            return;
+        }
+
+        var tinted = _tintCache.Get(_creator, bitmap, source, color);
+        drawing.DrawImage(tinted, destination,
+            new Rect(0, 0, tinted.Size.Width, tinted.Size.Height), opacity);
     }
 
     private static Windows.UI.Color Rgb(IReadOnlyList<double> color) =>

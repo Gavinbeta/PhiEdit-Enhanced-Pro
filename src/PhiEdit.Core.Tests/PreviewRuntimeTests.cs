@@ -141,4 +141,60 @@ public class PreviewRuntimeTests
         Assert.True(lateNote.Y > 0);
         Assert.True(lateNote.Y < earlyNote.Y);
     }
+
+    [Fact]
+    public void IntervalIndex_QueryReturnsOverlappingIntervals()
+    {
+        var index = new IntervalIndex<string>(
+            new[] { "a", "b", "c" },
+            item => item switch { "a" => 0, "b" => 5, _ => 10 },
+            item => item switch { "a" => 4, "b" => 6, _ => 20 });
+
+        var hit = index.Query(3, 5).Select(entry => entry.Item).ToList();
+        Assert.Equal(new[] { "a", "b" }, hit);
+        Assert.Empty(index.Query(7, 9));
+    }
+
+    [Fact]
+    public void StaticNote_StaysVisible_WhenLineFloorDrifts()
+    {
+        var chart = new ChartDocument();
+        var line = chart.AddLine();
+        line.AddEvent(new LineEvent
+        {
+            Kind = EventTrackKind.Speed,
+            StartBeat = Beat.Zero,
+            EndBeat = Beat.FromValue(100),
+            StartValue = 10,
+            EndValue = 10,
+        });
+        var staticNote = new Note { Type = NoteType.Tap, StartBeat = Beat.FromValue(4), Speed = 0, PositionX = 0 };
+        staticNote.EndBeat = staticNote.StartBeat;
+        line.Notes.Add(staticNote);
+        var tempo = chart.BuildTempoMap();
+        var runtime = new LineRuntime(line, tempo);
+        var seconds = tempo.SecondsAt(2);
+        var state = runtime.State(seconds);
+
+        Assert.True(runtime.Floor(seconds) > 1000);
+        Assert.Contains(staticNote, runtime.VisibleNotes(seconds, state).Select(entry => entry.Note));
+    }
+
+    [Fact]
+    public void RecentHits_SkipsFakeNotes_AndDoesNotEmitHoldEndPulse()
+    {
+        var chart = new ChartDocument();
+        var line = chart.AddLine();
+        var hold = new Note { Type = NoteType.Hold, StartBeat = Beat.Zero, EndBeat = Beat.FromValue(1) };
+        var fake = new Note { Type = NoteType.Tap, StartBeat = Beat.FromValue(0.25), IsFake = true };
+        fake.EndBeat = fake.StartBeat;
+        line.Notes.Add(hold);
+        line.Notes.Add(fake);
+        var runtime = new LineRuntime(line, chart.BuildTempoMap());
+
+        var hits = runtime.RecentHits(1, 10);
+        Assert.Equal(3, hits.Count);
+        Assert.All(hits, hit => Assert.Same(hold, hit.Entry.Note));
+        Assert.DoesNotContain(hits, hit => Math.Abs(hit.Time - runtime.Notes[0].End) < 1e-9);
+    }
 }

@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using PhiEdit.Core.Beats;
+using PhiEdit.Core.Easing;
 using PhiEdit.Core.Charts;
 using PhiEdit.Core.Editing;
 using PhiEdit.Core.Layout;
@@ -27,6 +28,9 @@ public sealed class EventSurface : UserControl
 
     /// <summary>触发拖动所需的最小位移（像素）。</summary>
     private const double DragThreshold = 3;
+
+    /// <summary>事件条的最小可见高度（像素）。</summary>
+    private const float MinEventHeight = 6f;
 
     private readonly CanvasControl _canvas = new()
     {
@@ -222,7 +226,8 @@ public sealed class EventSurface : UserControl
 
                 var rectTop = (float)Math.Max(0, top);
                 var rectBottom = (float)Math.Min(height, bottom);
-                var rectHeight = Math.Max(2f, rectBottom - rectTop);
+                // 零长度事件也要有可读的厚度，便于观察与点选。
+                var rectHeight = Math.Max(MinEventHeight, rectBottom - rectTop);
                 var selected = session.SelectedEvents.Contains(item);
 
                 var fill = selected ? Palette.EventFillSelected : Palette.EventFill;
@@ -231,7 +236,39 @@ public sealed class EventSurface : UserControl
                     EditorPalette.WithAlpha(fill, 64).ToWinColor());
                 drawing.DrawRectangle(new Rect(barX, rectTop, (float)barWidth, rectHeight), stroke.ToWinColor(),
                     selected ? 2f : 1f);
+
+                DrawEasingCurve(drawing, item, barX + (float)barWidth / 2, rectTop, rectBottom);
             }
+        }
+    }
+
+    /// <summary>
+    /// 在事件条内绘制缓动曲线：起点值在下、终点值在上，与原版一致。
+    /// </summary>
+    private void DrawEasingCurve(CanvasDrawingSession drawing, LineEvent item, float centerX, float top, float bottom)
+    {
+        var duration = item.DurationBeats;
+        if (duration <= 1e-9 || Math.Abs(item.EndValue - item.StartValue) < 1e-9)
+        {
+            return;
+        }
+
+        const int steps = 24;
+        var path = new List<Vector2>(steps + 1);
+        for (var step = 0; step <= steps; step++)
+        {
+            var progress = step / (double)steps;
+            var eased = Easing.Evaluate(progress, Math.Max(1, item.Easing));
+            var value = item.StartValue + (item.EndValue - item.StartValue) * eased;
+            var ratio = (value - item.StartValue) / (item.EndValue - item.StartValue);
+            var y = bottom - (float)ratio * (bottom - top);
+            path.Add(new Vector2(centerX, y));
+        }
+
+        var color = EditorPalette.WithAlpha(Palette.EventStroke, 210).ToWinColor();
+        for (var index = 1; index < path.Count; index++)
+        {
+            drawing.DrawLine(path[index - 1], path[index], color, 1.5f);
         }
     }
 
@@ -336,6 +373,8 @@ public sealed class EventSurface : UserControl
         {
             if (ctrl)
             {
+                // Ctrl+单击：加选 / 取消加选；先取消音符选择，两类对象互斥。
+                _session.SelectedNotes.Clear();
                 if (!_session.SelectedEvents.Remove(hit))
                 {
                     _session.SelectedEvents.Add(hit);
@@ -349,8 +388,8 @@ public sealed class EventSurface : UserControl
 
             if (!_session.SelectedEvents.Contains(hit))
             {
-                _session.SelectedEvents.Clear();
-                _session.SelectedEvents.Add(hit);
+                // 选择事件时先取消音符选择，两类对象的选择互斥。
+                _session.SelectEvent(hit);
             }
 
             _dragEvent = hit;
@@ -593,7 +632,9 @@ public sealed class EventSurface : UserControl
             {
                 var top = viewport.YAtBeat(item.EndBeat.Value);
                 var bottom = viewport.YAtBeat(item.StartBeat.Value);
-                if (y >= top - 3 && y <= bottom + 3)
+                var half = Math.Max(MinEventHeight, Math.Abs(bottom - top)) / 2;
+                var center = (top + bottom) / 2;
+                if (y >= center - half - 2 && y <= center + half + 2)
                 {
                     return item;
                 }

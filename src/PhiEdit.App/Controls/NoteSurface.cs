@@ -4,10 +4,12 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using PhiEdit.Core.Beats;
+using PhiEdit.Core.Skins;
 using PhiEdit.Core.Charts;
 using PhiEdit.Core.Editing;
 using PhiEdit.Core.Layout;
 using PhiEdit.Core.Rendering;
+using PhiEdit.App.Services;
 using System.Numerics;
 using Windows.Foundation;
 
@@ -54,6 +56,7 @@ public sealed class NoteSurface : UserControl
     {
         Content = _canvas;
         _canvas.Draw += OnDraw;
+        _canvas.CreateResources += (sender, _) => EnsureSkinLoaded(sender);
         _canvas.SizeChanged += (_, _) => Invalidate();
         _canvas.PointerPressed += OnPointerPressed;
         _canvas.PointerMoved += OnPointerMoved;
@@ -65,6 +68,71 @@ public sealed class NoteSurface : UserControl
 
     /// <summary>编辑器配色。</summary>
     public EditorPalette Palette { get; set; } = new();
+
+    /// <summary>资源包贴图渲染器；为空时退回纯色绘制。</summary>
+    public NoteSkinRenderer? Renderer { get; set; }
+
+    /// <summary>用于加载资源包贴图的资源创建器。</summary>
+    public ICanvasResourceCreator CanvasResourceCreator => _canvas;
+
+    /// <summary>贴图加载失败时对外报告。</summary>
+    public event EventHandler<string>? SkinLoadFailed;
+
+    /// <summary>
+    /// 请求重新加载当前生效的资源包贴图。
+    /// Win2D 的画布设备在首次绘制或 CreateResources 时才创建，
+    /// 因此这里通过 TryCreateResources 确保在设备就绪后再加载贴图。
+    /// </summary>
+    public void RequestSkinReload()
+    {
+        _skinReloadPending = true;
+        Invalidate();
+    }
+
+    private bool _skinLoading;
+
+    private bool _skinReloadPending;
+
+    /// <summary>
+    /// 确保贴图已加载。画布设备在首次绘制时才就绪，
+    /// 因此在绘制回调里启动加载，完成后再触发一次重绘。
+    /// </summary>
+    private void EnsureSkinLoaded(ICanvasResourceCreator creator)
+    {
+        var skin = _session?.Skins.Active;
+        var renderer = Renderer;
+        if (skin is null || renderer is null || _skinLoading)
+        {
+            return;
+        }
+
+        if (!_skinReloadPending && renderer.IsReady && renderer.Skin?.Id == skin.Id)
+        {
+            return;
+        }
+
+        _skinReloadPending = false;
+        _skinLoading = true;
+        _ = LoadSkinAsync(creator, skin, renderer);
+    }
+
+    private async Task LoadSkinAsync(ICanvasResourceCreator creator, PhiEdit.Core.Skins.NoteSkin skin,
+        NoteSkinRenderer renderer)
+    {
+        try
+        {
+            await renderer.ApplyAsync(creator, skin);
+            Invalidate();
+        }
+        catch (Exception exception)
+        {
+            SkinLoadFailed?.Invoke(this, $"皮肤加载失败：{exception.Message}");
+        }
+        finally
+        {
+            _skinLoading = false;
+        }
+    }
 
     public EditorSession? Session
     {
@@ -123,6 +191,8 @@ public sealed class NoteSurface : UserControl
         var viewport = session.Viewport;
         viewport.ViewportHeight = height;
         viewport.NoteWidth = width;
+
+        EnsureSkinLoaded(sender);
 
         var playheadY = viewport.PlayheadY;
 
@@ -231,11 +301,15 @@ public sealed class NoteSurface : UserControl
         var noteWidth = NoteWidth(width);
         const float noteHeight = 9f;
 
+        var renderer = Renderer;
+        var skin = renderer?.Skin;
+        var textured = renderer is not null && renderer.IsReady;
+
         foreach (var note in line.Notes)
         {
             var y = viewport.YAtBeat(note.StartBeat.Value);
             var endY = viewport.YAtBeat(note.EndBeat.Value);
-            if (Math.Max(y, endY) < -30 || Math.Min(y, endY) > height + 30)
+            if (Math.Max(y, endY) < -60 || Math.Min(y, endY) > height + 60)
             {
                 continue;
             }
@@ -243,7 +317,20 @@ public sealed class NoteSurface : UserControl
             var x = (float)viewport.StageXToPixel(note.PositionX);
             var color = Palette.NoteColor(note.Type).ToWinColor();
             var selected = session.SelectedNotes.Contains(note);
+            var highlighted = selected;
 
+            if (textured && skin is not null && DrawTextured(drawing, renderer, skin, note, x, y, endY, noteWidth, noteHeight, highlighted))
+            {
+                if (selected)
+                {
+                    drawing.DrawRoundedRectangle(new Rect(x - noteWidth / 2 - 3, y - noteHeight / 2 - 3, noteWidth + 6, noteHeight + 6), 6, 6,
+                        Palette.Selection.ToWinColor(), 2f);
+                }
+
+                continue;
+            }
+
+            // 无贴图时的纯色绘制。
             if (note.Type == NoteType.Hold && Math.Abs(endY - y) > 0.5)
             {
                 var top = (float)Math.Min(y, endY);
@@ -261,6 +348,90 @@ public sealed class NoteSurface : UserControl
                     Palette.Selection.ToWinColor(), 2f);
             }
         }
+    }
+
+    /// <summary>使用资源包贴图绘制音符；缺少贴图时返回 false 以退回纯色绘制。</summary>
+    private static bool DrawTextured(CanvasDrawingSession drawing, NoteSkinRenderer renderer, NoteSkin skin,
+        Note note, float x, double y, double endY, double noteWidth, float noteHeight, bool highlighted)
+    {
+        if (note.Type == NoteType.Hold)
+        {
+            return DrawHoldTextured(drawing, renderer, skin, x, y, endY, noteWidth, highlighted);
+        }
+
+        var name = note.Type switch
+        {
+            NoteType.Drag => highlighted ? "drag_mh.png" : "drag.png",
+            NoteType.Flick => highlighted ? "flick_mh.png" : "flick.png",
+            _ => highlighted ? "click_mh.png" : "click.png",
+        };
+
+        var bitmap = renderer[name];
+        if (bitmap is null)
+        {
+            return false;
+        }
+
+        var half = (float)noteWidth / 2;
+        drawing.DrawImage(bitmap,
+            new Rect(x - half, y - noteHeight / 2, (float)noteWidth, noteHeight),
+            new Rect(0, 0, bitmap.Size.Width, bitmap.Size.Height));
+        return true;
+    }
+
+    /// <summary>绘制 Hold 音符：头部贴图 + 可拉伸的身体 + 尾部贴图。</summary>
+    private static bool DrawHoldTextured(CanvasDrawingSession drawing, NoteSkinRenderer renderer, NoteSkin skin,
+        float x, double y, double endY, double noteWidth, bool highlighted)
+    {
+        var name = highlighted ? "hold_mh.png" : "hold.png";
+        var bitmap = renderer[name];
+        if (bitmap is null)
+        {
+            return false;
+        }
+
+        var atlas = highlighted ? skin.Info.HoldAtlasMH : skin.Info.HoldAtlas;
+        var tailPixels = atlas[0];
+        var headPixels = atlas[1];
+        var imageHeight = bitmap.Size.Height;
+        var bodyPixels = Math.Max(0, imageHeight - tailPixels - headPixels);
+        if (bodyPixels <= 0)
+        {
+            return false;
+        }
+
+        // 时间自下而上流逝：起点（头）在下方，终点（尾）在上方。
+        var headY = Math.Max(y, endY);
+        var tailY = Math.Min(y, endY);
+        var scale = noteWidth / bitmap.Size.Width;
+        var headHeight = (float)(headPixels * scale);
+        var tailHeight = (float)(tailPixels * scale);
+        var half = (float)noteWidth / 2;
+
+        // 身体：横向平铺，纵向拉伸到两段之间。
+        var bodyTop = headY - headHeight;
+        var bodyHeight = Math.Max(0, bodyTop - tailY - tailHeight);
+        if (bodyHeight > 0)
+        {
+            drawing.DrawImage(bitmap,
+                new Rect(x - half, bodyTop, (float)noteWidth, bodyHeight),
+                new Rect(0, tailPixels + headPixels, bitmap.Size.Width, bodyPixels));
+        }
+
+        // 头部贴图（位于起点）。
+        drawing.DrawImage(bitmap,
+            new Rect(x - half, headY - headHeight, (float)noteWidth, headHeight),
+            new Rect(0, tailPixels, bitmap.Size.Width, headPixels));
+
+        // 尾部贴图（位于终点）。
+        if (tailHeight > 0)
+        {
+            drawing.DrawImage(bitmap,
+                new Rect(x - half, tailY, (float)noteWidth, tailHeight),
+                new Rect(0, 0, bitmap.Size.Width, tailPixels));
+        }
+
+        return true;
     }
 
     private static double NoteWidth(double paneWidth) => Math.Max(28, Math.Min(96, paneWidth * 0.12));
@@ -291,6 +462,7 @@ public sealed class NoteSurface : UserControl
             if (ctrl)
             {
                 // Ctrl+单击：加选 / 取消加选，不进入拖动。
+                _session.SelectedEvents.Clear();
                 if (!_session.SelectedNotes.Remove(hit))
                 {
                     _session.SelectedNotes.Add(hit);
@@ -304,8 +476,8 @@ public sealed class NoteSurface : UserControl
 
             if (!_session.SelectedNotes.Contains(hit))
             {
-                _session.SelectedNotes.Clear();
-                _session.SelectedNotes.Add(hit);
+                // 选择音符时先取消事件选择，两类对象的选择互斥。
+                _session.SelectNote(hit);
                 SelectionChanged?.Invoke(this, EventArgs.Empty);
             }
 

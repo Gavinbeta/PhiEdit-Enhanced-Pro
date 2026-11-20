@@ -93,3 +93,63 @@ public class ClipboardTests
         Assert.Single(line.Notes);
     }
 }
+
+public class SelectionTests
+{
+    [Fact]
+    public void SelectingEvent_ClearsNoteSelection()
+    {
+        var session = new EditorSession();
+        var editor = new ChartEditor(session);
+        var line = session.Document.AddLine();
+        session.CurrentLineIndex = session.Document.Lines.IndexOf(line);
+
+        var note = editor.PlaceNote(line, NoteType.Tap, Beat.FromValue(1), 0);
+        var item = editor.AddEvent(line, EventTrackKind.Alpha, 0, Beat.FromValue(0), 1);
+
+        session.SelectNote(note);
+        Assert.Single(session.SelectedNotes);
+        Assert.Empty(session.SelectedEvents);
+
+        session.SelectEvent(item);
+        Assert.Empty(session.SelectedNotes);
+        Assert.Single(session.SelectedEvents);
+    }
+
+    [Fact]
+    public void SelectingNote_ClearsEventSelection()
+    {
+        var session = new EditorSession();
+        var editor = new ChartEditor(session);
+        var line = session.Document.AddLine();
+        session.CurrentLineIndex = session.Document.Lines.IndexOf(line);
+
+        var note = editor.PlaceNote(line, NoteType.Tap, Beat.FromValue(1), 0);
+        var item = editor.AddEvent(line, EventTrackKind.Speed, 0, Beat.FromValue(0), 1);
+
+        session.SelectEvent(item);
+        Assert.Single(session.SelectedEvents);
+
+        session.SelectNote(note);
+        Assert.Empty(session.SelectedEvents);
+        Assert.Single(session.SelectedNotes);
+    }
+
+    [Fact]
+    public void AdditiveSelection_KeepsSameKindOnly()
+    {
+        var session = new EditorSession();
+        var editor = new ChartEditor(session);
+        var line = session.Document.AddLine();
+        session.CurrentLineIndex = session.Document.Lines.IndexOf(line);
+
+        var first = editor.PlaceNote(line, NoteType.Tap, Beat.FromValue(1), 0);
+        var second = editor.PlaceNote(line, NoteType.Tap, Beat.FromValue(2), 0);
+
+        session.SelectNote(first);
+        session.SelectNote(second, additive: true);
+
+        Assert.Equal(2, session.SelectedNotes.Count);
+        Assert.Empty(session.SelectedEvents);
+    }
+}

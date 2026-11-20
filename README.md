@@ -56,6 +56,19 @@ dotnet test src/PhiEdit.Core.Tests/PhiEdit.Core.Tests.csproj
 > 先执行 `chcp 65001` 再构建即可。仓库提供了 `build.cmd` 自动完成该设置。
 > Visual Studio 内部构建不受此影响。
 
+## 音符资源包（贴图）
+
+程序支持 RPE 的**音符资源包**（Note Skin）机制：资源包是一个 ZIP，内含 `info.yml` 清单、
+9 张必���贴图（`click/drag/flick/hold` 的普通与命中高亮版 + `hit_fx`）以及可选音效。
+
+- 内置资源包：随程序分发的 `高仿官皮新版`（`src/PhiEdit.App/Assets/NoteSkins/`），
+  启动即加载并生效，音符按贴图绘制（含 Hold 的头/身/尾三段图集）。
+- 导入：工具栏「设置」→ 子页面 →「导入资源包」，选中 ZIP 即可导入并立即应用。
+- 清单字段：`name` / `author` / `description` / `hitFx` / `holdAtlas` / `holdAtlasMH` /
+  `hitFxDuration` / `hitFxScale` / `hitFxRotate` / `hitFxTinted` / `hideParticles` /
+  `holdKeepHead` / `holdRepeat` / `holdCompact` / `colorPerfect` / `colorGood`。
+- 设置子页面为模态：遮罩覆盖主窗口，关闭前无法操作主页面，尺寸固定并居中。
+
 ## 界面结构
 
 主窗口从正中间分成两个编辑区，与原版 RPE 的编辑观感一致：

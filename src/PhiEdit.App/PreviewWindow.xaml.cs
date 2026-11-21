@@ -28,6 +28,7 @@ public sealed partial class PreviewWindow : Window
     {
         _session = session;
         InitializeComponent();
+        PreviewSurface.BackgroundBrightness = Math.Clamp(BackgroundBrightnessSlider.Value / 100.0, 0, 1);
 
         AppWindow.Resize(new SizeInt32(1200, 800));
         PreviewSurface.Session = session;
@@ -165,8 +166,16 @@ public sealed partial class PreviewWindow : Window
         _audio.Rate = rate;
     }
 
-    private void OnBackgroundBrightnessChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e) =>
+    private void OnBackgroundBrightnessChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        // XAML 初始化时 Value 赋值会先触发 ValueChanged，此时 PreviewSurface 尚未赋值。
+        if (PreviewSurface is null)
+        {
+            return;
+        }
+
         PreviewSurface.BackgroundBrightness = Math.Clamp(e.NewValue / 100.0, 0, 1);
+    }
 
     private void OnAudioFlyoutOpening(object sender, object e)
     {

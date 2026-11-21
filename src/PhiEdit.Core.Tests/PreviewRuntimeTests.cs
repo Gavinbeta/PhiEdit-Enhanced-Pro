@@ -181,6 +181,28 @@ public class PreviewRuntimeTests
     }
 
     [Fact]
+    public void VisibleNotes_UsesExplicitZeroVisibleTime()
+    {
+        var chart = new ChartDocument();
+        var line = chart.AddLine();
+        var note = new Note
+        {
+            Type = NoteType.Drag,
+            StartBeat = Beat.FromValue(4),
+            Speed = 0,
+            VisibleTime = 0,
+            PositionX = 0,
+        };
+        note.EndBeat = note.StartBeat;
+        line.Notes.Add(note);
+        var tempo = chart.BuildTempoMap();
+        var runtime = new LineRuntime(line, tempo);
+
+        Assert.DoesNotContain(note, runtime.VisibleNotes(tempo.SecondsAt(2), runtime.State(tempo.SecondsAt(2))).Select(entry => entry.Note));
+        Assert.Contains(note, runtime.VisibleNotes(tempo.SecondsAt(4), runtime.State(tempo.SecondsAt(4))).Select(entry => entry.Note));
+    }
+
+    [Fact]
     public void RecentHits_SkipsFakeNotes_AndDoesNotEmitHoldEndPulse()
     {
         var chart = new ChartDocument();

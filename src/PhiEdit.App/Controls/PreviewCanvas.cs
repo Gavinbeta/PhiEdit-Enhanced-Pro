@@ -424,9 +424,9 @@ public sealed class PreviewCanvas : UserControl
         var visibleCache = new Dictionary<int, IReadOnlyList<NoteEntry>>();
         using (drawing.CreateLayer(1, new Rect(viewport.Left, viewport.Top, viewport.Width, viewport.Height)))
         {
-            DrawPass(drawing, sender, PassKind.Line, states, originX, originY, scale, seconds, visibleCache);
-            DrawPass(drawing, sender, PassKind.Hold, states, originX, originY, scale, seconds, visibleCache);
-            DrawPass(drawing, sender, PassKind.Note, states, originX, originY, scale, seconds, visibleCache);
+            DrawPass(drawing, sender, PassKind.Line, states, originX, originY, scale, viewport, seconds, visibleCache);
+            DrawPass(drawing, sender, PassKind.Hold, states, originX, originY, scale, viewport, seconds, visibleCache);
+            DrawPass(drawing, sender, PassKind.Note, states, originX, originY, scale, viewport, seconds, visibleCache);
             DrawHits(drawing, states, originX, originY, scale, seconds, viewport);
         }
 
@@ -454,9 +454,12 @@ public sealed class PreviewCanvas : UserControl
     private enum PassKind { Line, Hold, Note }
 
     private void DrawPass(CanvasDrawingSession drawing, ICanvasResourceCreator creator, PassKind pass,
-        IReadOnlyList<LineState> states, float originX, float originY, float scale, double seconds,
-        Dictionary<int, IReadOnlyList<NoteEntry>> visibleCache)
+        IReadOnlyList<LineState> states, float originX, float originY, float scale, PreviewViewport viewport,
+        double seconds, Dictionary<int, IReadOnlyList<NoteEntry>> visibleCache)
     {
+        var aspectRatio = viewport.Height > 0 ? viewport.Width / viewport.Height : 1.5;
+        var positionScale = PreviewViewport.PositionScale(aspectRatio);
+        var visibleDivisor = Math.Max(1, viewport.Width / Math.Max(1, scale) / StageWidth);
         foreach (var index in _scene.Order)
         {
             if (index < 0 || index >= states.Count)
@@ -487,7 +490,12 @@ public sealed class PreviewCanvas : UserControl
             {
                 if (!visibleCache.TryGetValue(index, out var entries))
                 {
-                    entries = runtime.VisibleNotes(seconds, state, 1600);
+                    // 参考 preview.mjs drawScene：远处判定线的音符可以被画布中心之外很长的距离，
+                    // 固定 1600 会先把它从 VisibleNotes 过滤掉。按线中心到舞台中心的距离扩大半径。
+                    var lineDistance = Math.Sqrt(state.X * state.X + state.Y * state.Y);
+                    var radius = (1600 * visibleDivisor + lineDistance) /
+                                 Math.Max(0.01, Math.Abs(positionScale.Y));
+                    entries = runtime.VisibleNotes(seconds, state, radius);
                     visibleCache[index] = entries;
                 }
 
@@ -504,9 +512,20 @@ public sealed class PreviewCanvas : UserControl
                         continue;
                     }
 
-                    var noteX = centerX + (float)(position.X * scale);
-                    var headY = centerY - (float)(position.Y * scale);
-                    var tailY = centerY - (float)(position.Tail * scale);
+                    var localX = position.X;
+                    var localY = position.Y;
+                    var localTail = position.Tail;
+                    // 参考 editor-display.mjs previewNotePosition：无父线的音符局部距离随预览比例缩放。
+                    if (runtime.Line.Father < 0 && (positionScale.X != 1 || positionScale.Y != 1))
+                    {
+                        localX *= positionScale.X;
+                        localY *= positionScale.Y;
+                        localTail *= positionScale.Y;
+                    }
+
+                    var noteX = centerX + (float)(localX * scale);
+                    var headY = centerY - (float)(localY * scale);
+                    var tailY = centerY - (float)(localTail * scale);
                     var noteWidth = (float)(LogicalNoteSize * scale * position.Size);
                     var heightWidth = (float)(LogicalNoteSize * scale * position.SizeY);
                     var highlight = _scene.Simultaneous.Contains(entry.Note);
@@ -790,7 +809,8 @@ public sealed class PreviewCanvas : UserControl
     {
         var defaultTint = new[] { 255.0, 236.0, 160.0 };
         var pack = _packRenderer.IsReady ? _packRenderer.Skin : null;
-        var positionScale = PreviewViewport.PositionScale();
+        var aspectRatio = viewport.Height > 0 ? viewport.Width / viewport.Height : 1.5;
+        var positionScale = PreviewViewport.PositionScale(aspectRatio);
         const double lifetime = 2.0 / 3.0;
         var samples = new Dictionary<long, IReadOnlyList<LineState>>();
 
@@ -832,6 +852,16 @@ public sealed class PreviewCanvas : UserControl
 
                 var hitState = hitStates[index];
                 var position = runtime.NoteState(entry, hitState, time);
+                if (runtime.Line.Father < 0 && (positionScale.X != 1 || positionScale.Y != 1))
+                {
+                    position = position with
+                    {
+                        X = position.X * positionScale.X,
+                        Y = position.Y * positionScale.Y,
+                        Tail = position.Tail * positionScale.Y,
+                    };
+                }
+
                 var angle = hitState.Rotation * Math.PI / 180;
                 var worldX = hitState.X + position.X * Math.Cos(angle) + position.Y * Math.Sin(angle);
                 var worldY = -hitState.Y + position.X * Math.Sin(angle) - position.Y * Math.Cos(angle);

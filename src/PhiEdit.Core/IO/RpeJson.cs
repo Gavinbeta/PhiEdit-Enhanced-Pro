@@ -175,7 +175,7 @@ public static class RpeJson
             noteNode["endTime"] = WriteBeat(note.Type == NoteType.Hold ? note.EndBeat : note.StartBeat);
             noteNode["positionX"] = note.PositionX;
             noteNode["yOffset"] = note.PositionY;
-            noteNode["above"] = note.IsUp ? 1 : 0;
+            noteNode["above"] = note.IsUp ? 1 : 2;
             noteNode["isFake"] = note.IsFake ? 1 : 0;
             noteNode["speed"] = note.Speed;
             noteNode["size"] = note.Size;
@@ -608,6 +608,19 @@ public static class RpeJson
     {
         if (element.TryGetProperty("above", out var above))
         {
+            // 参考 chart.mjs noteIsAbove：只有 above === 1 位于判定线上方，
+            // 2 表示下方；不能按普通布尔值把 2 也当作 true。
+            if (above.ValueKind == JsonValueKind.Number)
+            {
+                return above.GetDouble() == 1;
+            }
+
+            if (above.ValueKind == JsonValueKind.String &&
+                double.TryParse(above.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
+            {
+                return value == 1;
+            }
+
             return GetBool(above);
         }
 

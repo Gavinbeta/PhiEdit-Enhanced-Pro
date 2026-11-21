@@ -127,7 +127,8 @@ public sealed class LineRuntime
             entry => entry.Start,
             entry => entry.End);
         _hitTimes = _notes.OrderBy(entry => entry.Start).ToList();
-        _minSpeed = _notes.Aggregate(1.0, (minimum, entry) => Math.Min(minimum, Math.Abs(entry.Note.Speed == 0 ? 1 : entry.Note.Speed)));
+        _minSpeed = _notes.Aggregate(1.0, (minimum, entry) =>
+            Math.Min(minimum, Math.Abs(double.IsFinite(entry.Note.Speed) && entry.Note.Speed != 0 ? entry.Note.Speed : 1)));
         _hasYControl = line.YControl.Count > 1 && line.YControl.Any(point => Math.Abs(point.Y - 1) > 1e-6);
     }
 
@@ -189,8 +190,7 @@ public sealed class LineRuntime
 
     private bool IsVisible(NoteEntry entry, double seconds, LineState state)
     {
-        if (entry.End < seconds ||
-            entry.Start - seconds > (entry.Note.VisibleTime > 0 ? entry.Note.VisibleTime : 999999))
+        if (entry.End < seconds || entry.Start - seconds > entry.Note.VisibleTime)
         {
             return false;
         }

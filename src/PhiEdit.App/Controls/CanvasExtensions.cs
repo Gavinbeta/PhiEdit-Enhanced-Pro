@@ -12,7 +12,7 @@ namespace PhiEdit.App.Controls;
 public static class CanvasExtensions
 {
     /// <summary>实时预览与渲染专用的数字/英文字体，主界面不使用。</summary>
-    public const string PreviewFontFamily = "cmdysj";
+    public const string PreviewFontFamily = "cmdysj.ttf#cmdysj";
 
     private static readonly Dictionary<(float Size, bool Center, bool Right, bool Bold, string Family), CanvasTextFormat> Formats = new();
     private static bool _previewFontAdded;

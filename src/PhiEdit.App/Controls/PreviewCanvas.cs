@@ -439,45 +439,44 @@ public sealed class PreviewCanvas : UserControl
         var combo = LowerBound(_hudTimes, seconds);
         var score = total == 0 ? 0 : 1_000_000.0 * combo / total;
 
+        var originX = viewport.Left + viewport.Width / 2;
+        var originY = viewport.Top + viewport.Height / 2;
+        float X(double logical) => (float)(originX + logical * scale);
+        float Y(double logical) => (float)(originY - logical * scale);
+
         var pause = _textures["Pause.png"];
         if (pause is not null)
         {
             var size = 42 * scale;
             drawing.DrawImage(pause,
-                new Rect(viewport.Left + 18 * scale, viewport.Top + 14 * scale, size, size),
+                new Rect(X(-634.68), Y(419.04) - size, size, size),
                 new Rect(0, 0, pause.Size.Width, pause.Size.Height), 1);
         }
 
         var progress = Math.Clamp((seconds + _session.Document.OffsetMilliseconds / 1000.0) /
             Math.Max(0.001, _hudDuration), 0, 1);
-        drawing.FillRectangle(new Rect(viewport.Left, viewport.Top,
+        drawing.FillRectangle(new Rect(X(0), Y(446.04) - 4 * scale,
             viewport.Width * progress, 8 * scale), white);
 
         if (combo >= 3)
         {
             DrawUiText(drawing, combo.ToString(CultureInfo.InvariantCulture),
-                (float)(viewport.Left + viewport.Width / 2), (float)(viewport.Top + 58 * scale),
-                67 * scale, white, center: true);
+                X(0.072), Y(405), 67 * scale, white, center: true, middle: true);
             DrawUiText(drawing, "AUTOPLAY",
-                (float)(viewport.Left + viewport.Width / 2), (float)(viewport.Top + 128 * scale),
-                35 * scale, white, center: true);
+                X(0.072), Y(360), 35 * scale, white, center: true, middle: true);
         }
 
         DrawUiText(drawing, ((long)Math.Round(score)).ToString("D7", CultureInfo.InvariantCulture),
-            (float)(viewport.Left + viewport.Width - 24 * scale), (float)(viewport.Top + 14 * scale),
-            49 * scale, white, right: true);
+            X(641.16), Y(427.46), 49 * scale, white, right: true);
         DrawUiText(drawing, _session.Document.SongName,
-            (float)(viewport.Left + 24 * scale), (float)(viewport.Top + viewport.Height - 44 * scale),
-            35 * scale, white);
+            X(-636.6), Y(-427.5), 35 * scale, white);
         DrawUiText(drawing, _session.Document.Difficulty,
-            (float)(viewport.Left + viewport.Width - 24 * scale),
-            (float)(viewport.Top + viewport.Height - 44 * scale),
-            33 * scale, white, right: true);
+            X(641.16), Y(-427.5), 33 * scale, white, right: true);
     }
 
     private void DrawUiText(CanvasDrawingSession drawing, string text, float x, float y,
-        float size, Windows.UI.Color color, bool center = false, bool right = false) =>
-        PreviewGlyphText.Draw(drawing, text, new Vector2(x, y), size, color, center, right);
+        float size, Windows.UI.Color color, bool center = false, bool right = false, bool middle = false) =>
+        PreviewGlyphText.Draw(drawing, text, new Vector2(x, y), size, color, center, right, middle: middle);
 
     private static int LowerBound(IReadOnlyList<double> values, double value)
     {
@@ -828,11 +827,11 @@ public sealed class PreviewCanvas : UserControl
         var size = Math.Max(1, (int)Math.Round(52 * scale));
         if (PreviewGlyphText.IsAscii(normalized) && !normalized.Contains('\n'))
         {
-            var glyphWidth = PreviewGlyphText.Measure(normalized, size);
+            var glyphWidth = PreviewGlyphText.Measure(drawing, normalized, size);
             var glyphLeft = (float)(centerX - glyphWidth * line.AnchorX);
             var glyphTop = (float)(centerY - size * (1 - line.AnchorY));
             PreviewGlyphText.Draw(drawing, normalized,
-                new Vector2(glyphLeft, glyphTop - PreviewGlyphText.Ascent(size)), size, WithAlpha(color, alpha));
+                new Vector2(glyphLeft, glyphTop), size, WithAlpha(color, alpha));
             return;
         }
 

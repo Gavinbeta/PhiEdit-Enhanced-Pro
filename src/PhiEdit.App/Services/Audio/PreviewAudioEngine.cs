@@ -41,6 +41,8 @@ public sealed class PreviewAudioEngine : IPreviewTimeSource, IDisposable
 
     public string Status { get; private set; } = "音频未加载";
 
+    public string OutputKind { get; private set; } = "未初始化";
+
     public async Task LoadAsync(EditorSession session, NoteSkin? skin)
     {
         var revision = Interlocked.Increment(ref _loadRevision);
@@ -55,8 +57,8 @@ public sealed class PreviewAudioEngine : IPreviewTimeSource, IDisposable
         Buses = result.Buses;
         InitializeOutput();
         Status = result.Music is null
-            ? $"背景音缺失 · 命中音 {result.Hits.Length}"
-            : $"音频就绪 · 命中音 {result.Hits.Length}";
+            ? $"背景音缺失 · 命中音 {result.Hits.Length} · {OutputKind}"
+            : $"音频就绪 · 命中音 {result.Hits.Length} · {OutputKind}";
     }
 
     public void Play()
@@ -102,27 +104,39 @@ public sealed class PreviewAudioEngine : IPreviewTimeSource, IDisposable
 
     private IWavePlayer CreateOutput()
     {
-        // 参考实现都把 44.1kHz 立体声 float PCM 交给系统音频栈：
-        // phira-render 直接输出 f32le，PhiEdit Base 用 Web Audio 的 GainNode 交给系统。
-        // 因此这里使用 WASAPI 共享模式（普通系统音量，不独占设备），让系统完成重采样与混音。
-        // 不手动转 16 位，避免驱动格式转换产生嗡嗡声。
+        // 参考实现把音频交给系统音频栈：Web Audio 的 GainNode 或系统的共享会话。
+        // 事件驱动 shared 在部分远程/虚拟音频设备上会周期性抖动并产生嗡嗡声，
+        // 因此优先用非事件驱动的共享会话；它仍走系统音量，也不独占设备。
         try
         {
-            var shared = new WasapiOut(AudioClientShareMode.Shared, true, 100);
+            var shared = new WasapiOut(AudioClientShareMode.Shared, false, 100);
             shared.Init(_mixer.ToWaveProvider());
+            OutputKind = "系统共享输出";
             return shared;
         }
         catch
         {
-            // 极少数系统不支持共享事件驱动时退回普通 WaveOut，仍然走系统音量。
-            var output = new WaveOutEvent
-            {
-                DesiredLatency = 100,
-                NumberOfBuffers = 3,
-            };
-            output.Init(new WaveFloatTo16Provider(_mixer.ToWaveProvider()));
-            return output;
         }
+
+        try
+        {
+            var shared = new WasapiOut(AudioClientShareMode.Shared, true, 100);
+            shared.Init(_mixer.ToWaveProvider());
+            OutputKind = "系统共享事件输出";
+            return shared;
+        }
+        catch
+        {
+        }
+
+        var output = new WaveOutEvent
+        {
+            DesiredLatency = 120,
+            NumberOfBuffers = 4,
+        };
+        output.Init(new WaveFloatTo16Provider(_mixer.ToWaveProvider()));
+        OutputKind = "WaveOut 回退";
+        return output;
     }
 
     private static MixerData BuildMixerData(EditorSession session, NoteSkin? skin)

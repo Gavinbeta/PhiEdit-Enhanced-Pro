@@ -538,9 +538,11 @@ public sealed class PreviewCanvas : UserControl
                     var noteTransform = drawing.Transform;
                     if (Math.Abs(position.Skew) > 1e-6)
                     {
+                        // 与 canvas 的 translate(center) + transform(skew) 等价：
+                        // 先在音符局部坐标做斜切，再平移到判定线上的音符中心。
                         var skew = new Matrix3x2(1, 0, (float)Math.Tan(position.Skew * Math.PI / 180), 1, 0, 0);
-                        drawing.Transform = Matrix3x2.CreateTranslation(noteX, headY) * skew *
-                                            Matrix3x2.CreateTranslation(-noteX, -headY) * noteTransform;
+                        drawing.Transform = skew *
+                                            Matrix3x2.CreateTranslation(noteX, headY) * noteTransform;
                     }
 
                     DrawNote(drawing, entry.Note, noteX, headY, tailY, noteWidth, heightWidth,
@@ -775,8 +777,10 @@ public sealed class PreviewCanvas : UserControl
         var direction = length < 0.01 ? (isUp ? 1 : -1) : tailY < headY ? 1 : -1;
 
         var old = drawing.Transform;
-        drawing.Transform = Matrix3x2.CreateTranslation(centerX, headY) *
-                            Matrix3x2.CreateScale(1, direction) * old;
+        // 参考 skin.mjs hold：先 translate(centerX, headY) 再 scale(1, direction)。
+        // Win2D 的行向量矩阵需要反序拼接，否则 Hold 会绕画布原点翻转而倾斜/错位。
+        drawing.Transform = Matrix3x2.CreateScale(1, direction) *
+                            Matrix3x2.CreateTranslation(centerX, headY) * old;
 
         if (bodyPixels > 0 && length > 0)
         {

@@ -14,19 +14,24 @@ public readonly record struct ScheduledHit(long TimeSamples, int SoundIndex, int
 
 internal sealed class ActiveVoice
 {
-    public ActiveVoice(PcmAudioBuffer buffer, int startFrame, int lineIndex)
+    public ActiveVoice(PcmAudioBuffer buffer, long startSample, int lineIndex)
     {
         Buffer = buffer;
-        StartFrame = startFrame;
+        StartSample = startSample;
         LineIndex = lineIndex;
     }
 
     public PcmAudioBuffer Buffer { get; }
-    public int StartFrame { get; }
-    public int LineIndex { get; }
-    public int Position { get; set; }
 
-    public bool Finished => Position >= Buffer.Frames;
+    /// <summary>命中点在谱面时间轴上的绝对采样位置，跨缓冲区保持不变。</summary>
+    public long StartSample { get; }
+
+    public int LineIndex { get; }
+
+    /// <summary>已消费的源采样数；按播放倍速递增。</summary>
+    public double SourcePosition { get; set; }
+
+    public bool Finished => SourcePosition >= Buffer.Frames;
 }
 
 /// <summary>
@@ -176,8 +181,9 @@ public sealed class AudioMixer : ISampleProvider
                     continue;
                 }
 
-                _active.Add(new ActiveVoice(_sounds[hit.SoundIndex],
-                    (int)Math.Round((hit.TimeSamples - start) / rate), hit.LineIndex));
+                // 命中音按谱面绝对采样点注册；每个缓冲区重新换算相对位置，
+                // 否则跨缓冲区时 StartFrame 不再递减，命中音会一直延后甚至听不到。
+                _active.Add(new ActiveVoice(_sounds[hit.SoundIndex], hit.TimeSamples, hit.LineIndex));
             }
 
             var anySolo = _buses.Any(bus => bus.Solo);
@@ -192,16 +198,28 @@ public sealed class AudioMixer : ISampleProvider
             {
                 var voice = _active[voiceIndex];
                 var source = voice.Buffer.Samples;
-                while (voice.Position < voice.Buffer.Frames && voice.StartFrame + voice.Position < frames)
+                for (var frame = 0; frame < frames; frame++)
                 {
-                    var target = offset + (voice.StartFrame + voice.Position) * 2;
-                    var sourceIndex = voice.Position * 2;
+                    var chartSample = start + (long)Math.Round(frame * rate);
+                    if (chartSample < voice.StartSample || voice.Finished)
+                    {
+                        continue;
+                    }
+
+                    var sourceIndex = (int)voice.SourcePosition;
+                    if (sourceIndex >= voice.Buffer.Frames)
+                    {
+                        break;
+                    }
+
+                    var target = offset + frame * 2;
+                    var sourceFrame = sourceIndex * 2;
                     var lineGain = voice.LineIndex >= 0 && voice.LineIndex < busGains.Length
                         ? busGains[voice.LineIndex]
                         : _hitVolume;
-                    buffer[target] += source[sourceIndex] * lineGain;
-                    buffer[target + 1] += source[sourceIndex + 1] * lineGain;
-                    voice.Position++;
+                    buffer[target] += source[sourceFrame] * lineGain;
+                    buffer[target + 1] += source[sourceFrame + 1] * lineGain;
+                    voice.SourcePosition += rate;
                 }
 
                 if (voice.Finished)

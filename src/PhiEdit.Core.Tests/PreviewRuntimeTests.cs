@@ -2,11 +2,21 @@ using PhiEdit.Core.Beats;
 using PhiEdit.Core.Charts;
 using PhiEdit.Core.Preview;
 using Xunit;
+using EasingMath = PhiEdit.Core.Easing.Easing;
 
 namespace PhiEdit.Core.Tests;
 
 public class PreviewRuntimeTests
 {
+    [Fact]
+    public void Easing_MatchesReferenceCurveNumbers()
+    {
+        Assert.Equal(0.5, EasingMath.Curve(1, 0.5), 6);
+        Assert.Equal(Math.Sin(Math.PI / 4), EasingMath.Curve(2, 0.5), 6);
+        Assert.Equal(1 - Math.Cos(Math.PI / 4), EasingMath.Curve(3, 0.5), 6);
+        Assert.Equal(0.75, EasingMath.Curve(4, 0.5), 6);
+    }
+
     [Fact]
     public void SceneRuntime_SamplesEveryLine_IrrespectiveOfEditorSelection()
     {

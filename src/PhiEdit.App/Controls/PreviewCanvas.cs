@@ -477,8 +477,7 @@ public sealed class PreviewCanvas : UserControl
 
     private void DrawUiText(CanvasDrawingSession drawing, string text, float x, float y,
         float size, Windows.UI.Color color, bool center = false, bool right = false) =>
-        drawing.DrawText(text, new Vector2(x, y), color,
-            CanvasExtensions.TextFormat(size, center, right, family: CanvasExtensions.PreviewFontFamily));
+        PreviewGlyphText.Draw(drawing, text, new Vector2(x, y), size, color, center, right);
 
     private static int LowerBound(IReadOnlyList<double> values, double value)
     {
@@ -827,6 +826,16 @@ public sealed class PreviewCanvas : UserControl
 
         var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
         var size = Math.Max(1, (int)Math.Round(52 * scale));
+        if (PreviewGlyphText.IsAscii(normalized) && !normalized.Contains('\n'))
+        {
+            var glyphWidth = PreviewGlyphText.Measure(normalized, size);
+            var glyphLeft = (float)(centerX - glyphWidth * line.AnchorX);
+            var glyphTop = (float)(centerY - size * (1 - line.AnchorY));
+            PreviewGlyphText.Draw(drawing, normalized,
+                new Vector2(glyphLeft, glyphTop - PreviewGlyphText.Ascent(size)), size, WithAlpha(color, alpha));
+            return;
+        }
+
         var key = (normalized, size);
         if (!_textLayouts.TryGetValue(key, out var layout))
         {
@@ -1196,26 +1205,6 @@ public sealed class PreviewCanvas : UserControl
 
             var label = index.ToString(CultureInfo.InvariantCulture);
             var fontSize = Math.Max(1, (int)Math.Round((selected ? 48 : 30) * scale));
-            var key = (label, fontSize, selected);
-            if (!_guideLayouts.TryGetValue(key, out var layout))
-            {
-                if (_guideLayouts.Count >= 256)
-                {
-                    foreach (var old in _guideLayouts.Values)
-                    {
-                        old.Dispose();
-                    }
-                    _guideLayouts.Clear();
-                }
-
-                layout = new CanvasTextLayout(creator, label,
-                    CanvasExtensions.TextFormat(fontSize, bold: selected, family: CanvasExtensions.PreviewFontFamily), 0, 0)
-                {
-                    HorizontalAlignment = CanvasHorizontalAlignment.Center,
-                    VerticalAlignment = CanvasVerticalAlignment.Top,
-                };
-                _guideLayouts[key] = layout;
-            }
 
             var oldTransform = drawing.Transform;
             var baseTransform = Matrix3x2.CreateRotation((float)(state.Rotation * Math.PI / 180)) *
@@ -1239,10 +1228,9 @@ public sealed class PreviewCanvas : UserControl
             }
 
             drawing.Transform = baseTransform;
-            var bounds = layout.LayoutBounds;
-            var textX = (float)(-bounds.Width / 2 - bounds.X);
-            var textY = (float)((selected ? 8 : 4) * scale - bounds.Y);
-            drawing.DrawTextLayout(layout, new Vector2(textX, textY), selected ? selectedColor : normalColor);
+            var textY = (float)((selected ? 8 : 4) * scale);
+            PreviewGlyphText.Draw(drawing, label, new Vector2(0, textY), fontSize,
+                selected ? selectedColor : normalColor, center: true, bold: selected);
             drawing.Transform = oldTransform;
         }
         }

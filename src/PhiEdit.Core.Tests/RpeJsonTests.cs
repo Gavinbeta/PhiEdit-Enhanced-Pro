@@ -146,6 +146,27 @@ public class RpeJsonTests
     }
 
     [Fact]
+    public void Read_AboveTwoMeansBelowAndRoundTrips()
+    {
+        const string json = """
+        {
+          "META": { "RPEVersion": 170 },
+          "BPMList": [{ "bpm": 120, "startTime": [0, 0, 1] }],
+          "judgeLineList": [{
+            "eventLayers": [{}],
+            "notes": [{ "type": 4, "startTime": [2,0,1], "endTime": [2,0,1], "positionX": 0, "above": 2 }]
+          }]
+        }
+        """;
+
+        var chart = RpeJson.Read(json);
+        Assert.False(chart.Lines[0].Notes[0].IsUp);
+
+        var written = RpeJson.Write(chart);
+        Assert.Contains("\"above\": 2", written);
+    }
+
+    [Fact]
     public void Read_ToleratesMissingFields()
     {
         var chart = RpeJson.Read("{\"judgeLineList\":[{\"notes\":[{\"type\":1}]}]}");

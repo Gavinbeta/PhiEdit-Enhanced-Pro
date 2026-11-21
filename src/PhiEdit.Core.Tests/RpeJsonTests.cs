@@ -17,6 +17,7 @@ public class RpeJsonTests
             ChartName = "Expert",
             Difficulty = "12",
             Background = "Resources/bg.png",
+            OffsetMilliseconds = 20,
         };
 
         var line = chart.AddLine();
@@ -49,6 +50,7 @@ public class RpeJsonTests
         Assert.Equal("测试作者", restored.SongArtist);
         Assert.Equal("Expert", restored.ChartName);
         Assert.Equal("Resources/bg.png", restored.Background);
+        Assert.Equal(20, restored.OffsetMilliseconds, 6);
         Assert.Single(restored.Lines);
 
         var restoredLine = restored.Lines[0];

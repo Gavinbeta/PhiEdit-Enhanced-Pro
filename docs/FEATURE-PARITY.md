@@ -73,8 +73,10 @@
 | 热键自定义 | ⬜ | 当前热键固定 |
 | 音符资源包（导入 / 内置 / 切换） | ✅ | info.yml 清单校验、9 张贴图、Hold 图集；编辑区与实时预览同步生效 |
 | 打击特效图集 | 🚧 | 默认 img-N 帧与资源包 hitFx 图集均已接入预览，包含染色、旋转、包络与粒子 |
-| 资源包音效（click/drag/flick.ogg） | 🚧 | 已解析并保留，播放尚未接入 |
-| 音频播放接口 | 🚧 | `IPreviewAudioPlayer` / `IPreviewTimeSource` 已定义，当前使用占位时钟，未接实际音频 |
+| 资源包音效（click/drag/flick.ogg） | ✅ | 资源包与谱面内音效均可加载，按音符类型映射 |
+| 背景音乐播放 | ✅ | 支持 PEZ/同目录音乐与 META.offset，WASAPI 10ms 缓冲 |
+| 判定线音效总线 | ✅ | 每条判定线独立音量/静音/独奏，为多音轨预留 |
+| 音频播放接口 | ✅ | 已实现低延迟引擎并接入预览时间源；离线渲染导出待补 |
 | 编辑器皮肤（整体配色皮肤包） | ⬜ | |
 | 模组（Mod）系统 | ⬜ | |
 | 插件扩展接口 | ✅ | `IEditorExtension` / `IChartSerializer` / `IToolProvider` |

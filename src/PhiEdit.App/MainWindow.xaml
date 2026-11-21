@@ -23,7 +23,7 @@
                 <TextBlock x:Name="DocumentTitle" Grid.Column="1" Margin="16,0,0,0" VerticalAlignment="Center"
                            FontSize="13" Foreground="{ThemeResource TextSecondaryBrush}" Text="未命名" />
                 <TextBlock x:Name="BuildVersion" Grid.Column="2" VerticalAlignment="Center" FontSize="12"
-                           Foreground="{ThemeResource TextSecondaryBrush}" Text="v1.3.2_BETA9" />
+                           Foreground="{ThemeResource TextSecondaryBrush}" Text="v1.4.0_BETA1" />
             </Grid>
         </Grid>
 

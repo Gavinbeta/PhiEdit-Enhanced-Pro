@@ -21,7 +21,7 @@
                 </Button>
                 <TextBlock Text="背景亮度" FontSize="12" Foreground="#FF8FA0B8" VerticalAlignment="Center" />
                 <Slider x:Name="BackgroundBrightnessSlider" Width="110" Minimum="0" Maximum="100"
-                        Value="35" SmallChange="1" ValueChanged="OnBackgroundBrightnessChanged"
+                        Value="100" SmallChange="1" ValueChanged="OnBackgroundBrightnessChanged"
                         VerticalAlignment="Center" />
                 <TextBlock x:Name="TimeReadout" Text="0.000 s" FontSize="13" Foreground="#FFD8E0EC"
                            VerticalAlignment="Center" MinWidth="150" />

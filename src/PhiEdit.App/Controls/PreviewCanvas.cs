@@ -42,7 +42,7 @@ public sealed class PreviewCanvas : UserControl
     private readonly NoteSkinRenderer _packRenderer = new();
     private readonly TintedBitmapCache _tintCache = new();
     private readonly Dictionary<(string Text, int Size), CanvasTextLayout> _textLayouts = new();
-    private readonly Dictionary<(string Text, int Size), CanvasTextLayout> _guideLayouts = new();
+    private readonly Dictionary<(string Text, int Size, bool Bold), CanvasTextLayout> _guideLayouts = new();
     private readonly Dictionary<string, CanvasBitmap> _assetTextures = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _loadingTextures = new(StringComparer.OrdinalIgnoreCase);
     private EditorSession? _session;
@@ -61,7 +61,7 @@ public sealed class PreviewCanvas : UserControl
     private bool _backgroundLoading;
     private bool _backgroundResolved;
     private long _backgroundGeneration;
-    private double _backgroundBrightness = 0.35;
+    private double _backgroundBrightness = 1;
     private long _packGeneration;
     private long _assetGeneration;
     private bool _loading;
@@ -995,65 +995,40 @@ public sealed class PreviewCanvas : UserControl
     }
 
     /// <summary>
-    /// 参考 preview.mjs drawGuides：中心菱形方向箭头 + 合并后的判定线编号。
-    /// 当前编辑线为绿色，其余为白色；该辅助层不受判定线透明度影响。
+    /// 参考 preview.mjs drawGuides：中心线号 + 当前线的菱形方向箭头。
+    /// 每条线只显示一个编号；当前线为加粗大号绿色，其余为白色；辅助层不受判定线透明度影响。
     /// </summary>
     private void DrawGuides(CanvasDrawingSession drawing, ICanvasResourceCreator creator,
         IReadOnlyList<LineState> states, float scale, int selectedLine, PreviewViewport viewport)
     {
         var originX = viewport.Left + viewport.Width / 2;
         var originY = viewport.Top + viewport.Height / 2;
-        var groups = new List<GuideGroup>();
-        var radius = Math.Max(1, 10 * scale);
+        var selectedColor = Windows.UI.Color.FromArgb(255, 0, 200, 0);
+        var normalColor = Windows.UI.Color.FromArgb(255, 255, 255, 255);
+        var arrow = _textures["Arrow2.png"];
+        var margin = 60 * scale;
+
         for (var index = 0; index < states.Count; index++)
         {
-            if (!double.IsFinite(states[index].X) || !double.IsFinite(states[index].Y) ||
-                !double.IsFinite(states[index].Rotation))
+            var state = states[index];
+            if (!double.IsFinite(state.X) || !double.IsFinite(state.Y) || !double.IsFinite(state.Rotation))
             {
                 continue;
             }
 
-            var x = (float)(originX + states[index].X * scale);
-            var y = (float)(originY - states[index].Y * scale);
-            var margin = 60 * scale;
+            var x = (float)(originX + state.X * scale);
+            var y = (float)(originY - state.Y * scale);
             if (x < viewport.Left - margin || x > viewport.Left + viewport.Width + margin ||
                 y < viewport.Top - margin || y > viewport.Top + viewport.Height + margin)
             {
                 continue;
             }
 
-            GuideGroup? group = null;
-            foreach (var candidate in groups)
-            {
-                var dx = candidate.X - x;
-                var dy = candidate.Y - y;
-                if (Math.Abs(candidate.Rotation - states[index].Rotation) < 0.01 &&
-                    Math.Sqrt(dx * dx + dy * dy) < radius)
-                {
-                    group = candidate;
-                    break;
-                }
-            }
-
-            if (group is null)
-            {
-                groups.Add(new GuideGroup(x, y, (float)states[index].Rotation, index));
-            }
-            else
-            {
-                group.Indices.Add(index);
-            }
-        }
-
-        var fontSize = Math.Max(1, (int)Math.Round(30 * scale));
-        var selectedColor = Windows.UI.Color.FromArgb(255, 0, 200, 0);
-        var normalColor = Windows.UI.Color.FromArgb(255, 255, 255, 255);
-        var arrow = _textures["Arrow2.png"];
-        foreach (var group in groups)
-        {
-            var selected = group.Indices.Contains(selectedLine);
-            var label = FormatLineNumbers(group.Indices);
-            if (!_guideLayouts.TryGetValue((label, fontSize), out var layout))
+            var selected = index == selectedLine;
+            var label = index.ToString(CultureInfo.InvariantCulture);
+            var fontSize = Math.Max(1, (int)Math.Round((selected ? 48 : 30) * scale));
+            var key = (label, fontSize, selected);
+            if (!_guideLayouts.TryGetValue(key, out var layout))
             {
                 if (_guideLayouts.Count >= 256)
                 {
@@ -1064,23 +1039,23 @@ public sealed class PreviewCanvas : UserControl
                     _guideLayouts.Clear();
                 }
 
-                // maxWidth=0 表示不限制宽度；LayoutBounds 才是文字实际范围。
-                // 之前用 2000 的宽度再在原点绘制，会把居中文字整体推到视口外。
-                layout = new CanvasTextLayout(creator, label, CanvasExtensions.TextFormat(fontSize), 0, 0)
+                layout = new CanvasTextLayout(creator, label,
+                    CanvasExtensions.TextFormat(fontSize, bold: selected), 0, 0)
                 {
                     HorizontalAlignment = CanvasHorizontalAlignment.Center,
                     VerticalAlignment = CanvasVerticalAlignment.Top,
                 };
-                _guideLayouts[(label, fontSize)] = layout;
+                _guideLayouts[key] = layout;
             }
 
             var oldTransform = drawing.Transform;
-            drawing.Transform = Matrix3x2.CreateRotation((float)(group.Rotation * Math.PI / 180)) *
-                                Matrix3x2.CreateTranslation(group.X, group.Y) * oldTransform;
+            drawing.Transform = Matrix3x2.CreateRotation((float)(state.Rotation * Math.PI / 180)) *
+                                Matrix3x2.CreateTranslation(x, y) * oldTransform;
             var bounds = layout.LayoutBounds;
             var textX = (float)(-bounds.Width / 2 - bounds.X);
-            var textY = (float)(4 * scale - bounds.Y);
+            var textY = (float)((selected ? -6 : 4) * scale - bounds.Y);
             drawing.DrawTextLayout(layout, new Vector2(textX, textY), selected ? selectedColor : normalColor);
+
             if (selected)
             {
                 if (arrow is not null)
@@ -1093,9 +1068,8 @@ public sealed class PreviewCanvas : UserControl
                 }
                 else
                 {
-                    var color = normalColor;
-                    drawing.DrawLine(new Vector2(0, -24 * scale), new Vector2(-12 * scale, -8 * scale), color, 2);
-                    drawing.DrawLine(new Vector2(0, -24 * scale), new Vector2(12 * scale, -8 * scale), color, 2);
+                    drawing.DrawLine(new Vector2(0, -24 * scale), new Vector2(-12 * scale, -8 * scale), normalColor, 2);
+                    drawing.DrawLine(new Vector2(0, -24 * scale), new Vector2(12 * scale, -8 * scale), normalColor, 2);
                 }
             }
 

@@ -15,7 +15,7 @@ public sealed class RpeTextureRenderer
 
     private static string[] BuildNames() =>
     [
-        "line.png", "Arrow2.png", "Tap2.png", "Tap2HL.png", "Hold.png", "Hold3.png", "HoldEnd.png", "HoldHL.png",
+        "line.png", "Arrow2.png", "Pause.png", "Tap2.png", "Tap2HL.png", "Hold.png", "Hold3.png", "HoldEnd.png", "HoldHL.png",
         "HoldHead.png", "HoldHeadHL.png", "Flick2.png", "Flick2HL.png", "Drag2.png", "DragHL.png",
         .. Enumerable.Range(1, 31).Select(index => $"img-{index}.png"),
     ];

@@ -64,10 +64,14 @@ public sealed class PreviewCanvas : UserControl
     private double _backgroundBrightness = 1;
     private long _packGeneration;
     private long _assetGeneration;
+    private ChartDocument? _hudDocument;
+    private readonly List<double> _hudTimes = new();
+    private double _hudDuration;
     private bool _loading;
 
     public PreviewCanvas()
     {
+        CanvasExtensions.EnsurePreviewFont();
         Content = _canvas;
         _canvas.Draw += OnDraw;
         _canvas.CreateResources += (sender, _) => EnsureTexturesLoaded(sender);
@@ -391,6 +395,111 @@ public sealed class PreviewCanvas : UserControl
         return _tempoMap;
     }
 
+    private void PrepareHud(ChartDocument document, TempoMap tempo)
+    {
+        if (ReferenceEquals(_hudDocument, document) && _hudTimes.Count > 0)
+        {
+            return;
+        }
+
+        _hudDocument = document;
+        _hudTimes.Clear();
+        var lastBeat = 0.0;
+        var offset = document.OffsetMilliseconds / 1000.0;
+        foreach (var line in document.Lines)
+        {
+            foreach (var note in line.Notes)
+            {
+                if (note.IsFake)
+                {
+                    continue;
+                }
+
+                _hudTimes.Add(tempo.SecondsAt(note.StartBeat.Value, line.BpmFactor) + offset);
+                lastBeat = Math.Max(lastBeat, note.EndBeat.Value);
+            }
+        }
+
+        _hudTimes.Sort();
+        _hudDuration = document.SongDuration > 0
+            ? document.SongDuration
+            : tempo.SecondsAt(lastBeat + 4);
+    }
+
+    /// <summary>
+    /// 参考 game-ui.mjs：暂停、进度、连击、分数、曲名与难度。
+    /// 这里只按用户截图布局，不使用皮肤差异。
+    /// </summary>
+    private void DrawGameUi(CanvasDrawingSession drawing, float scale, double seconds,
+        PreviewViewport viewport)
+    {
+        PrepareHud(_session!.Document, GetTempo(_session.Document));
+        var white = Windows.UI.Color.FromArgb(255, 255, 255, 255);
+        var total = _hudTimes.Count;
+        var combo = LowerBound(_hudTimes, seconds);
+        var score = total == 0 ? 0 : 1_000_000.0 * combo / total;
+
+        var pause = _textures["Pause.png"];
+        if (pause is not null)
+        {
+            var size = 42 * scale;
+            drawing.DrawImage(pause,
+                new Rect(viewport.Left + 18 * scale, viewport.Top + 14 * scale, size, size),
+                new Rect(0, 0, pause.Size.Width, pause.Size.Height), 1);
+        }
+
+        var progress = Math.Clamp((seconds + _session.Document.OffsetMilliseconds / 1000.0) /
+            Math.Max(0.001, _hudDuration), 0, 1);
+        drawing.FillRectangle(new Rect(viewport.Left, viewport.Top,
+            viewport.Width * progress, 8 * scale), white);
+
+        if (combo >= 3)
+        {
+            DrawUiText(drawing, combo.ToString(CultureInfo.InvariantCulture),
+                (float)(viewport.Left + viewport.Width / 2), (float)(viewport.Top + 58 * scale),
+                67 * scale, white, center: true);
+            DrawUiText(drawing, "AUTOPLAY",
+                (float)(viewport.Left + viewport.Width / 2), (float)(viewport.Top + 128 * scale),
+                35 * scale, white, center: true);
+        }
+
+        DrawUiText(drawing, ((long)Math.Round(score)).ToString("D7", CultureInfo.InvariantCulture),
+            (float)(viewport.Left + viewport.Width - 24 * scale), (float)(viewport.Top + 14 * scale),
+            49 * scale, white, right: true);
+        DrawUiText(drawing, _session.Document.SongName,
+            (float)(viewport.Left + 24 * scale), (float)(viewport.Top + viewport.Height - 44 * scale),
+            35 * scale, white);
+        DrawUiText(drawing, _session.Document.Difficulty,
+            (float)(viewport.Left + viewport.Width - 24 * scale),
+            (float)(viewport.Top + viewport.Height - 44 * scale),
+            33 * scale, white, right: true);
+    }
+
+    private void DrawUiText(CanvasDrawingSession drawing, string text, float x, float y,
+        float size, Windows.UI.Color color, bool center = false, bool right = false) =>
+        drawing.DrawText(text, new Vector2(x, y), color,
+            CanvasExtensions.TextFormat(size, center, right, family: CanvasExtensions.PreviewFontFamily));
+
+    private static int LowerBound(IReadOnlyList<double> values, double value)
+    {
+        var low = 0;
+        var high = values.Count;
+        while (low < high)
+        {
+            var middle = (low + high) / 2;
+            if (values[middle] < value)
+            {
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+
+        return low;
+    }
+
     private void OnDraw(CanvasControl sender, CanvasDrawEventArgs args)
     {
         var session = _session;
@@ -448,6 +557,16 @@ public sealed class PreviewCanvas : UserControl
         var originY = (float)(viewport.Top + viewport.Height / 2);
 
         var visibleCache = new Dictionary<int, IReadOnlyList<NoteEntry>>();
+        var aspectRatio = viewport.Height > 0 ? viewport.Width / viewport.Height : 1.5;
+        var positionScale = PreviewViewport.PositionScale(aspectRatio);
+        var visibleDivisor = Math.Max(1, viewport.Width / Math.Max(1, scale) / StageWidth);
+        for (var index = 0; index < states.Count; index++)
+        {
+            var lineDistance = Math.Sqrt(states[index].X * states[index].X + states[index].Y * states[index].Y);
+            var radius = (1200 * visibleDivisor + lineDistance) / Math.Max(0.01, Math.Abs(positionScale.Y));
+            visibleCache[index] = _scene.Lines[index].VisibleNotes(seconds, states[index], radius);
+        }
+
         using (drawing.CreateLayer(1, new Rect(viewport.Left, viewport.Top, viewport.Width, viewport.Height)))
         {
             var selectedLine = _session?.CurrentLineIndex ?? -1;
@@ -455,6 +574,7 @@ public sealed class PreviewCanvas : UserControl
             DrawPass(drawing, sender, PassKind.Hold, states, originX, originY, scale, viewport, selectedLine, seconds, visibleCache);
             DrawPass(drawing, sender, PassKind.Note, states, originX, originY, scale, viewport, selectedLine, seconds, visibleCache);
             DrawHits(drawing, states, originX, originY, scale, seconds, viewport);
+            DrawGameUi(drawing, scale, seconds, viewport);
             DrawGuides(drawing, sender, states, scale, selectedLine, viewport);
         }
 
@@ -507,6 +627,12 @@ public sealed class PreviewCanvas : UserControl
             // 音符与 Hold pass 仍然要绘制，否则线淡出时音符会一起消失。
             if (pass == PassKind.Line &&
                 (runtime.Line.AttachUI || state.Alpha <= 0 || state.ScaleX == 0 || state.ScaleY == 0))
+            {
+                continue;
+            }
+
+            if (pass != PassKind.Line &&
+                (!visibleCache.TryGetValue(index, out var cached) || cached.Count == 0))
             {
                 continue;
             }
@@ -634,17 +760,15 @@ public sealed class PreviewCanvas : UserControl
         {
             lineColor = new double[] { 0, 200, 0 };
         }
-        else if (pack is not null && isDefault && !line.AttachUI &&
-            !runtime.HasTextEvents && !runtime.HasColorEvents)
+        else
         {
-            var perfect = pack.Info.ColorPerfect;
-            lineColor = new[]
+            // 实时预览中未编辑的判定线统一纯白；资源包只保留其透明度信息。
+            lineColor = new double[] { 255, 255, 255 };
+            if (pack is not null && isDefault && !line.AttachUI &&
+                !runtime.HasTextEvents && !runtime.HasColorEvents)
             {
-                (double)((perfect >> 16) & 0xFF),
-                (double)((perfect >> 8) & 0xFF),
-                (double)(perfect & 0xFF),
-            };
-            alpha *= (float)((perfect >> 24) & 0xFF) / 255f;
+                alpha *= (float)((pack.Info.ColorPerfect >> 24) & 0xFF) / 255f;
+            }
         }
 
         var tint = Rgb(lineColor);
@@ -715,7 +839,8 @@ public sealed class PreviewCanvas : UserControl
                 _textLayouts.Clear();
             }
 
-            layout = new CanvasTextLayout(_creator, normalized, CanvasExtensions.TextFormat(size), 10000, 10000);
+            layout = new CanvasTextLayout(_creator, normalized,
+                CanvasExtensions.TextFormat(size, family: CanvasExtensions.PreviewFontFamily), 10000, 10000);
             _textLayouts[key] = layout;
         }
 
@@ -1084,7 +1209,7 @@ public sealed class PreviewCanvas : UserControl
                 }
 
                 layout = new CanvasTextLayout(creator, label,
-                    CanvasExtensions.TextFormat(fontSize, bold: selected), 0, 0)
+                    CanvasExtensions.TextFormat(fontSize, bold: selected, family: CanvasExtensions.PreviewFontFamily), 0, 0)
                 {
                     HorizontalAlignment = CanvasHorizontalAlignment.Center,
                     VerticalAlignment = CanvasVerticalAlignment.Top,

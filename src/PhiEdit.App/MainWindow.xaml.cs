@@ -113,7 +113,8 @@ public sealed partial class MainWindow : Window
         LoadDefaultChart();
         RefreshAll();
 
-        RootLayout.Loaded += (_, _) => InitializeSkins();
+        // 资源包必须在预览窗口打开前装载，否则命中音与皮肤都会是空。
+        InitializeSkins();
     }
 
     // ---------------------------------------------------------------- 初始化

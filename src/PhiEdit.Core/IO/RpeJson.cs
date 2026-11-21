@@ -50,6 +50,7 @@ public static class RpeJson
             Difficulty = GetString(metaElement, "level") ?? GetString(root, "difficulty") ?? string.Empty,
             SongFilename = GetString(metaElement, "song") ?? GetString(root, "songFilename") ?? string.Empty,
             Background = GetString(metaElement, "background") ?? string.Empty,
+            OffsetMilliseconds = GetDouble(metaElement, "offset", GetDouble(root, "offset")),
             SongDuration = hasMeta ? 0 : GetDouble(root, "songDuration"),
             RpeVersion = (int)GetDouble(metaElement, "RPEVersion", GetDouble(root, "RPEVersion", 170)),
             RawRoot = JsonNode.Parse(text) as JsonObject,
@@ -105,7 +106,7 @@ public static class RpeJson
             ["level"] = chart.Difficulty,
             ["song"] = chart.SongFilename,
             ["background"] = chart.Background,
-            ["offset"] = 0,
+            ["offset"] = chart.OffsetMilliseconds,
         };
 
         var bpmArray = new JsonArray();

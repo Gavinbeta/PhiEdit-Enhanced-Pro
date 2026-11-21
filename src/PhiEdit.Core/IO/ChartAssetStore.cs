@@ -250,8 +250,52 @@ public sealed class ChartAssetStore
         return charts.Count == 1 ? charts[0] : null;
     }
 
+    /// <summary>按 META.song、info.txt 的 Song 与包内唯一音频解析背景音乐。</summary>
+    public string? FindSong(string? metaSong)
+    {
+        if (Resolve(metaSong) is not null)
+        {
+            return Normalize(metaSong!);
+        }
+
+        var infoDirectory = string.Empty;
+        foreach (var infoName in _files.Keys.Where(name => Path.GetFileName(name).Equals("info.txt", StringComparison.OrdinalIgnoreCase)))
+        {
+            var text = Encoding.UTF8.GetString(_files[infoName]);
+            infoDirectory = Path.GetDirectoryName(infoName) ?? string.Empty;
+            foreach (var line in text.Split('\n'))
+            {
+                var separator = line.IndexOf(':');
+                if (separator < 0 || !line[..separator].Trim().Equals("Song", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var value = line[(separator + 1)..].Trim();
+                var relative = infoDirectory.Length > 0 && !value.Contains('/') ? infoDirectory + "/" + value : value;
+                if (Resolve(relative) is not null)
+                {
+                    return Normalize(relative);
+                }
+
+                if (Resolve(value) is not null)
+                {
+                    return Normalize(value);
+                }
+            }
+        }
+
+        var directory = string.IsNullOrEmpty(metaSong) ? string.Empty : Path.GetDirectoryName(Normalize(metaSong)) ?? string.Empty;
+        var audios = _files.Keys.Where(name => IsAudio(name) &&
+            (directory.Length == 0 || name.StartsWith(directory + "/", StringComparison.OrdinalIgnoreCase))).ToList();
+        return audios.Count == 1 ? audios[0] : null;
+    }
+
     public static bool IsImage(string name) =>
         Regex.IsMatch(Path.GetExtension(name), @"^\.(png|jpe?g|webp|gif|bmp|avif)$", RegexOptions.IgnoreCase);
+
+    public static bool IsAudio(string name) =>
+        Regex.IsMatch(Path.GetExtension(name), @"^\.(mp3|wav|ogg|m4a|aac|flac)$", RegexOptions.IgnoreCase);
 
     private static string Normalize(string name) => name.Replace('\\', '/').TrimStart('/');
 }

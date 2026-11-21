@@ -20,6 +20,9 @@ public sealed class ChartDocument
 
     public double SongDuration { get; set; }
 
+    /// <summary>背景音偏移（毫秒）。音乐时间 = 谱面时间 + OffsetMilliseconds / 1000。</summary>
+    public double OffsetMilliseconds { get; set; }
+
     /// <summary>背景图资源名，来自 META.background。</summary>
     public string Background { get; set; } = "";
 

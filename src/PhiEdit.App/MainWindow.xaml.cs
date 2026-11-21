@@ -113,7 +113,7 @@ public sealed partial class MainWindow : Window
         LoadDefaultChart();
         RefreshAll();
 
-        RootLayout.Loaded += async (_, _) => await InitializeSkinsAsync();
+        RootLayout.Loaded += (_, _) => InitializeSkins();
     }
 
     // ---------------------------------------------------------------- 初始化
@@ -193,6 +193,7 @@ public sealed partial class MainWindow : Window
 
         Add(Windows.System.VirtualKey.S, Windows.System.VirtualKeyModifiers.Control, () => _ = SaveChart());
         Add(Windows.System.VirtualKey.O, Windows.System.VirtualKeyModifiers.Control, () => _ = OpenChart());
+        Add(Windows.System.VirtualKey.P, Windows.System.VirtualKeyModifiers.Control, OpenPreviewForStartup);
         Add(Windows.System.VirtualKey.Z, Windows.System.VirtualKeyModifiers.Control, Undo);
         Add(Windows.System.VirtualKey.Y, Windows.System.VirtualKeyModifiers.Control, Redo);
         Add(Windows.System.VirtualKey.S, Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift, () => _ = ExportChart());
@@ -402,7 +403,7 @@ public sealed partial class MainWindow : Window
     // ---------------------------------------------------------------- 设置与资源包
 
     /// <summary>装载内置资源包，并把首个资源包设为当前生效的皮肤。</summary>
-    private async Task InitializeSkinsAsync()
+    private void InitializeSkins()
     {
         var failures = BuiltinSkins.Load(_session);
         foreach (var failure in failures)
@@ -420,7 +421,7 @@ public sealed partial class MainWindow : Window
         RefreshSkinList();
     }
 
-    private async void OnSkinsChanged(object? sender, EventArgs e)
+    private void OnSkinsChanged(object? sender, EventArgs e)
     {
         RefreshSkinList();
         if (_session.Skins.Active is not null)
@@ -921,7 +922,7 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>打开独立实时预览窗口。预览内容始终来自整份谱面。</summary>
-    private void OnPreviewClick(object sender, RoutedEventArgs e)
+    public void OpenPreviewForStartup()
     {
         if (_previewWindow is null)
         {
@@ -932,6 +933,8 @@ public sealed partial class MainWindow : Window
         _previewWindow.SyncFromEditor(_session.Viewport.Position);
         _previewWindow.Activate();
     }
+
+    private void OnPreviewClick(object sender, RoutedEventArgs e) => OpenPreviewForStartup();
 
     private void OnLineSelectionChanged(object sender, SelectionChangedEventArgs e)
     {

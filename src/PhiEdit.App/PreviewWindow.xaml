@@ -10,6 +10,15 @@
             <StackPanel Orientation="Horizontal" Padding="10,6" Spacing="8" VerticalAlignment="Center">
                 <Button x:Name="PlayButton" Width="72" Click="OnPlayClick" Content="播放" />
                 <Button x:Name="StopButton" Width="72" Click="OnStopClick" Content="回到开头" />
+                <Button x:Name="AudioButton" Width="56" Content="音频">
+                    <Button.Flyout>
+                        <Flyout Opening="OnAudioFlyoutOpening">
+                            <ScrollViewer MaxHeight="420">
+                                <StackPanel x:Name="AudioPanel" Width="420" Padding="4" Spacing="8" />
+                            </ScrollViewer>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
                 <TextBlock x:Name="TimeReadout" Text="0.000 s" FontSize="13" Foreground="#FFD8E0EC"
                            VerticalAlignment="Center" MinWidth="150" />
                 <Slider x:Name="SeekSlider" Width="180" Minimum="0" Maximum="60" SmallChange="0.1"
@@ -22,7 +31,9 @@
                 </ComboBox>
                 <CheckBox x:Name="FollowEditorCheck" Content="跟随编辑位置" IsChecked="True"
                           Foreground="#FFD8E0EC" VerticalAlignment="Center" />
-                <TextBlock Text="预览始终显示整份谱面的所有判定线；音频播放接口已预留。"
+                <TextBlock x:Name="AudioStatus" Text="音频未加载" FontSize="12" Foreground="#FF8FA0B8"
+                           VerticalAlignment="Center" MinWidth="110" />
+                <TextBlock Text="背景音与音符音效分层播放；每条判定线可独立控制。"
                            FontSize="12" Foreground="#FF8FA0B8" VerticalAlignment="Center" />
             </StackPanel>
         </Border>

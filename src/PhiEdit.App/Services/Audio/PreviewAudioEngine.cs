@@ -8,36 +8,66 @@ using PhiEdit.Core.Skins;
 namespace PhiEdit.App.Services.Audio;
 
 /// <summary>
-/// 预览音频引擎。背景音乐与每条判定线的命中音分总线混音，
-/// 全部 PCM 预解码，命中音按采样点插入；输出走 WASAPI 共享会话，音量由系统控制。
+/// 预览音频引擎。参考 PhiEdit Base：背景音乐交给系统原生解码/输出，
+/// 命中音单独预解码并按谱面采样点调度；两条链路各自接系统音频会话，音量随系统音量。
 /// </summary>
 public sealed class PreviewAudioEngine : IPreviewTimeSource, IDisposable
 {
-    private readonly AudioMixer _mixer = new();
-    private IWavePlayer? _output;
-    private int _loadRevision;
-    private bool _disposed;
+    private readonly AudioMixer _hits = new();
+    private IWavePlayer? _musicOutput;
+    private IWavePlayer? _hitOutput;
+    private AudioFileReader? _musicReader;
+    private string? _musicTempPath;
+    private LineAudioBus[] _buses = Array.Empty<LineAudioBus>();
+    private double _offsetSeconds;
     private double _rate = 1;
+    private float _musicVolume = 0.75f;
+    private float _hitVolume = 0.3f;
+    private bool _playing;
+    private bool _disposed;
+    private int _loadRevision;
 
-    public bool IsLoaded => _mixer.IsLoaded;
+    public bool IsLoaded => _musicReader is not null || _hits.IsLoaded;
 
-    public bool IsPlaying => _output?.PlaybackState == PlaybackState.Playing;
+    public bool IsPlaying => _playing;
 
-    public double CurrentSeconds => _mixer.PositionSeconds;
+    public double CurrentSeconds
+    {
+        get
+        {
+            if (_musicReader is not null)
+            {
+                return Math.Max(0, _musicReader.CurrentTime.TotalSeconds - _offsetSeconds);
+            }
 
-    public double DurationSeconds => _mixer.DurationSeconds;
+            return _hits.PositionSeconds;
+        }
+    }
+
+    public double DurationSeconds
+    {
+        get
+        {
+            if (_musicReader is not null)
+            {
+                return Math.Max(0, _musicReader.TotalTime.TotalSeconds - _offsetSeconds);
+            }
+
+            return 0;
+        }
+    }
 
     public double Rate
     {
         get => _rate;
         set
         {
-            _rate = value;
-            _mixer.SetRate((float)value);
+            _rate = double.IsFinite(value) && value > 0 ? value : 1;
+            _hits.SetRate((float)_rate);
         }
     }
 
-    public IReadOnlyList<LineAudioBus> Buses { get; private set; } = Array.Empty<LineAudioBus>();
+    public IReadOnlyList<LineAudioBus> Buses => _buses;
 
     public string Status { get; private set; } = "音频未加载";
 
@@ -47,23 +77,57 @@ public sealed class PreviewAudioEngine : IPreviewTimeSource, IDisposable
     {
         var revision = Interlocked.Increment(ref _loadRevision);
         Status = "音频加载中";
-        var result = await Task.Run(() => BuildMixerData(session, skin));
+        var data = await Task.Run(() => BuildData(session, skin));
         if (revision != _loadRevision || _disposed)
         {
             return;
         }
 
-        _mixer.Configure(result.Music, session.Document.OffsetMilliseconds, result.Sounds, result.Hits, result.Buses);
-        Buses = result.Buses;
-        InitializeOutput();
-        Status = result.Music is null
-            ? $"背景音缺失 · 命中音 {result.Hits.Length} · {OutputKind}"
-            : $"音频就绪 · 命中音 {result.Hits.Length} · {OutputKind}";
+        StopOutputs();
+        DisposeMusic();
+
+        _buses = data.Buses;
+        _offsetSeconds = data.OffsetSeconds;
+        _hits.Configure(null, 0, data.Sounds, data.Hits, data.Buses);
+        _hits.SetVolumes(1, _hitVolume);
+        _hits.SetRate((float)_rate);
+        OutputKind = "系统共享输出";
+
+        if (data.MusicBytes is { Length: > 0 })
+        {
+            try
+            {
+                var extension = Path.GetExtension(data.MusicName ?? string.Empty);
+                if (string.IsNullOrWhiteSpace(extension))
+                {
+                    extension = ".mp3";
+                }
+
+                _musicTempPath = Path.Combine(Path.GetTempPath(), $"phiedit-preview-{Guid.NewGuid():N}{extension}");
+                File.WriteAllBytes(_musicTempPath, data.MusicBytes);
+                _musicReader = new AudioFileReader(_musicTempPath);
+                _musicOutput = CreateOutput();
+                _musicOutput.Init(_musicReader);
+                _musicOutput.Volume = _musicVolume;
+            }
+            catch
+            {
+                DisposeMusic();
+            }
+        }
+
+        _hitOutput = CreateOutput();
+        _hitOutput.Init(_hits.ToWaveProvider());
+        _hitOutput.Volume = 1;
+
+        Status = data.MusicBytes is null
+            ? $"背景音缺失 · 命中音 {data.Hits.Length} · {OutputKind}"
+            : $"音频就绪 · 命中音 {data.Hits.Length} · {OutputKind}";
     }
 
     public void Play()
     {
-        if (!IsLoaded || _disposed)
+        if (!IsLoaded || _disposed || _playing)
         {
             return;
         }
@@ -73,73 +137,98 @@ public sealed class PreviewAudioEngine : IPreviewTimeSource, IDisposable
             Seek(0);
         }
 
-        _output ??= CreateOutput();
-        _output.Play();
+        _hits.Seek(CurrentSeconds);
+        _musicOutput?.Play();
+        _hitOutput?.Play();
+        _playing = true;
     }
 
     public void Pause()
     {
-        if (_output?.PlaybackState == PlaybackState.Playing)
+        if (!_playing)
         {
-            _output.Stop();
+            return;
         }
+
+        _musicOutput?.Stop();
+        _hitOutput?.Stop();
+        _playing = false;
     }
 
     public void Seek(double seconds)
     {
-        _mixer.Seek(double.IsFinite(seconds) ? Math.Max(0, seconds) : 0);
+        var value = double.IsFinite(seconds) ? Math.Max(0, seconds) : 0;
+        if (_musicReader is not null)
+        {
+            var source = Math.Min(value + _offsetSeconds, Math.Max(0, _musicReader.TotalTime.TotalSeconds - 1e-6));
+            _musicReader.CurrentTime = TimeSpan.FromSeconds(source);
+        }
+
+        _hits.Seek(value);
     }
 
-    public void SetVolumes(float musicVolume, float hitVolume) => _mixer.SetVolumes(musicVolume, hitVolume);
+    public void SetVolumes(float musicVolume, float hitVolume)
+    {
+        _musicVolume = Math.Clamp(musicVolume, 0, 1);
+        _hitVolume = Math.Clamp(hitVolume, 0, 1);
+        if (_musicOutput is not null)
+        {
+            _musicOutput.Volume = _musicVolume;
+        }
+
+        _hits.SetVolumes(1, _hitVolume);
+    }
 
     public void SetBus(int lineIndex, float volume, bool muted, bool solo) =>
-        _mixer.SetBus(lineIndex, volume, muted, solo);
-
-    private void InitializeOutput()
-    {
-        _output?.Stop();
-        _output?.Dispose();
-        _output = CreateOutput();
-    }
+        _hits.SetBus(lineIndex, volume, muted, solo);
 
     private IWavePlayer CreateOutput()
     {
-        // 参考实现把音频交给系统音频栈：Web Audio 的 GainNode 或系统的共享会话。
-        // 事件驱动 shared 在部分远程/虚拟音频设备上会周期性抖动并产生嗡嗡声，
-        // 因此优先用非事件驱动的共享会话；它仍走系统音量，也不独占设备。
         try
         {
-            var shared = new WasapiOut(AudioClientShareMode.Shared, false, 100);
-            shared.Init(_mixer.ToWaveProvider());
-            OutputKind = "系统共享输出";
-            return shared;
+            return new WasapiOut(AudioClientShareMode.Shared, false, 100);
         }
         catch
         {
+            OutputKind = "WaveOut 回退";
+            return new WaveOutEvent
+            {
+                DesiredLatency = 120,
+                NumberOfBuffers = 4,
+            };
         }
-
-        try
-        {
-            var shared = new WasapiOut(AudioClientShareMode.Shared, true, 100);
-            shared.Init(_mixer.ToWaveProvider());
-            OutputKind = "系统共享事件输出";
-            return shared;
-        }
-        catch
-        {
-        }
-
-        var output = new WaveOutEvent
-        {
-            DesiredLatency = 120,
-            NumberOfBuffers = 4,
-        };
-        output.Init(new WaveFloatTo16Provider(_mixer.ToWaveProvider()));
-        OutputKind = "WaveOut 回退";
-        return output;
     }
 
-    private static MixerData BuildMixerData(EditorSession session, NoteSkin? skin)
+    private void StopOutputs()
+    {
+        _musicOutput?.Stop();
+        _hitOutput?.Stop();
+        _musicOutput?.Dispose();
+        _hitOutput?.Dispose();
+        _musicOutput = null;
+        _hitOutput = null;
+        _playing = false;
+    }
+
+    private void DisposeMusic()
+    {
+        _musicReader?.Dispose();
+        _musicReader = null;
+        if (_musicTempPath is not null && File.Exists(_musicTempPath))
+        {
+            try
+            {
+                File.Delete(_musicTempPath);
+            }
+            catch
+            {
+            }
+        }
+
+        _musicTempPath = null;
+    }
+
+    private static AudioData BuildData(EditorSession session, NoteSkin? skin)
     {
         var document = session.Document;
         var tempo = document.BuildTempoMap();
@@ -196,6 +285,7 @@ public sealed class PreviewAudioEngine : IPreviewTimeSource, IDisposable
                 {
                     index = ResolveSound(fileName);
                 }
+
                 if (index < 0)
                 {
                     continue;
@@ -207,32 +297,26 @@ public sealed class PreviewAudioEngine : IPreviewTimeSource, IDisposable
             }
         }
 
-        PcmAudioBuffer? music = null;
-        var musicName = session.Assets.FindSong(document.SongFilename);
-        if (musicName is not null)
+        byte[]? musicBytes = null;
+        string? musicName = null;
+        var musicNameInAssets = session.Assets.FindSong(document.SongFilename);
+        if (musicNameInAssets is not null)
         {
-            var bytes = session.Assets.Resolve(musicName);
-            if (bytes is not null)
-            {
-                try
-                {
-                    music = AudioDecoder.Decode(bytes, musicName);
-                }
-                catch
-                {
-                    music = null;
-                }
-            }
+            musicBytes = session.Assets.Resolve(musicNameInAssets);
+            musicName = musicNameInAssets;
         }
 
-        return new MixerData(music, sounds.ToArray(), hits.ToArray(), buses);
+        return new AudioData(musicBytes, musicName, sounds.ToArray(),
+            hits.OrderBy(hit => hit.TimeSamples).ToArray(), buses, offsetSeconds);
     }
 
-    private sealed record MixerData(
-        PcmAudioBuffer? Music,
+    private sealed record AudioData(
+        byte[]? MusicBytes,
+        string? MusicName,
         PcmAudioBuffer[] Sounds,
         ScheduledHit[] Hits,
-        LineAudioBus[] Buses);
+        LineAudioBus[] Buses,
+        double OffsetSeconds);
 
     public void Dispose()
     {
@@ -243,8 +327,7 @@ public sealed class PreviewAudioEngine : IPreviewTimeSource, IDisposable
 
         _disposed = true;
         Interlocked.Increment(ref _loadRevision);
-        _output?.Stop();
-        _output?.Dispose();
-        _output = null;
+        StopOutputs();
+        DisposeMusic();
     }
 }

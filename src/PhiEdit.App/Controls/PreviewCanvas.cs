@@ -265,7 +265,12 @@ public sealed class PreviewCanvas : UserControl
 
     private void EnsureBackgroundLoaded(ICanvasResourceCreator creator, string? name)
     {
-        if (string.IsNullOrEmpty(name) || name == _backgroundKey || _backgroundLoading)
+        if (string.IsNullOrEmpty(name) || _backgroundLoading)
+        {
+            return;
+        }
+
+        if (name == _backgroundKey && _background is not null)
         {
             return;
         }
@@ -313,6 +318,7 @@ public sealed class PreviewCanvas : UserControl
             {
                 _background = null;
                 _backgroundEffect = null;
+                _backgroundKey = null;
             }
         }
         finally
@@ -469,14 +475,14 @@ public sealed class PreviewCanvas : UserControl
         var drawHeight = _background.Size.Height * factor;
         var destination = new Rect((width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
         var source = new Rect(0, 0, _background.Size.Width, _background.Size.Height);
-        var blur = _backgroundEffect ?? new GaussianBlurEffect { Source = _background, BlurAmount = 10.5f };
         var opacity = (float)Math.Clamp(_backgroundBrightness, 0, 1);
         if (opacity <= 0)
         {
             return;
         }
 
-        drawing.DrawImage(blur, destination, source, opacity);
+        // 直接绘制原图，避免 Win2D 效果链在部分设备上返回空结果导致背景不可见。
+        drawing.DrawImage(_background, destination, source, opacity);
     }
 
     private enum PassKind { Line, Hold, Note }

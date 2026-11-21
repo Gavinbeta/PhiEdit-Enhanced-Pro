@@ -1,3 +1,4 @@
+using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using PhiEdit.Core.Charts;
 using PhiEdit.Core.Editing;
@@ -7,8 +8,8 @@ using PhiEdit.Core.Skins;
 namespace PhiEdit.App.Services.Audio;
 
 /// <summary>
-/// 低延迟预览音频引擎。背景音乐与每条判定线的命中音分总线混音，
-/// 全部 PCM 预解码，命中音按采样点插入；输出走普通系统音频会话，音量由系统控制。
+/// 预览音频引擎。背景音乐与每条判定线的命中音分总线混音，
+/// 全部 PCM 预解码，命中音按采样点插入；输出走 WASAPI 共享会话，音量由系统控制。
 /// </summary>
 public sealed class PreviewAudioEngine : IPreviewTimeSource, IDisposable
 {
@@ -53,7 +54,9 @@ public sealed class PreviewAudioEngine : IPreviewTimeSource, IDisposable
         _mixer.Configure(result.Music, session.Document.OffsetMilliseconds, result.Sounds, result.Hits, result.Buses);
         Buses = result.Buses;
         InitializeOutput();
-        Status = result.Music is null ? "背景音缺失，仅命中音可用" : "系统输出就绪";
+        Status = result.Music is null
+            ? $"背景音缺失 · 命中音 {result.Hits.Length}"
+            : $"音频就绪 · 命中音 {result.Hits.Length}";
     }
 
     public void Play()
@@ -99,15 +102,27 @@ public sealed class PreviewAudioEngine : IPreviewTimeSource, IDisposable
 
     private IWavePlayer CreateOutput()
     {
-        // 使用普通系统音频输出：与浏览器/播放器共用设备，音量由系统音量混合器控制。
-        // 不再使用 WASAPI 独占模式，避免独占设备导致其他程序视频卡顿、且系统音量无效。
-        var output = new WaveOutEvent
+        // 参考实现都把 44.1kHz 立体声 float PCM 交给系统音频栈：
+        // phira-render 直接输出 f32le，PhiEdit Base 用 Web Audio 的 GainNode 交给系统。
+        // 因此这里使用 WASAPI 共享模式（普通系统音量，不独占设备），让系统完成重采样与混音。
+        // 不手动转 16 位，避免驱动格式转换产生嗡嗡声。
+        try
         {
-            DesiredLatency = 60,
-            NumberOfBuffers = 3,
-        };
-        output.Init(new WaveFloatTo16Provider(_mixer.ToWaveProvider()));
-        return output;
+            var shared = new WasapiOut(AudioClientShareMode.Shared, true, 100);
+            shared.Init(_mixer.ToWaveProvider());
+            return shared;
+        }
+        catch
+        {
+            // 极少数系统不支持共享事件驱动时退回普通 WaveOut，仍然走系统音量。
+            var output = new WaveOutEvent
+            {
+                DesiredLatency = 100,
+                NumberOfBuffers = 3,
+            };
+            output.Init(new WaveFloatTo16Provider(_mixer.ToWaveProvider()));
+            return output;
+        }
     }
 
     private static MixerData BuildMixerData(EditorSession session, NoteSkin? skin)

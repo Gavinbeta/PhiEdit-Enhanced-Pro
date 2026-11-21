@@ -165,6 +165,9 @@ public sealed partial class PreviewWindow : Window
         _audio.Rate = rate;
     }
 
+    private void OnBackgroundBrightnessChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e) =>
+        PreviewSurface.BackgroundBrightness = Math.Clamp(e.NewValue / 100.0, 0, 1);
+
     private void OnAudioFlyoutOpening(object sender, object e)
     {
         AudioPanel.Children.Clear();

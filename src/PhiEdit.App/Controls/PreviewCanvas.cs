@@ -61,6 +61,7 @@ public sealed class PreviewCanvas : UserControl
     private bool _backgroundLoading;
     private bool _backgroundResolved;
     private long _backgroundGeneration;
+    private double _backgroundBrightness = 0.35;
     private long _packGeneration;
     private long _assetGeneration;
     private bool _loading;
@@ -71,6 +72,23 @@ public sealed class PreviewCanvas : UserControl
         _canvas.Draw += OnDraw;
         _canvas.CreateResources += (sender, _) => EnsureTexturesLoaded(sender);
         _canvas.SizeChanged += (_, _) => Invalidate();
+    }
+
+    /// <summary>背景亮度，0 为纯黑，1 为原图亮度；对应参考 preview.backgroundAlpha。</summary>
+    public double BackgroundBrightness
+    {
+        get => _backgroundBrightness;
+        set
+        {
+            var clamped = Math.Clamp(value, 0, 1);
+            if (Math.Abs(_backgroundBrightness - clamped) < 1e-6)
+            {
+                return;
+            }
+
+            _backgroundBrightness = clamped;
+            Invalidate();
+        }
     }
 
     public EditorSession? Session
@@ -379,7 +397,7 @@ public sealed class PreviewCanvas : UserControl
         var width = (float)Math.Max(1, sender.ActualWidth);
         var height = (float)Math.Max(1, sender.ActualHeight);
         var drawing = args.DrawingSession;
-        drawing.Clear(Windows.UI.Color.FromArgb(255, 12, 14, 19));
+        drawing.Clear(Windows.UI.Color.FromArgb(255, 0, 0, 0));
 
         EnsureTexturesLoaded(sender);
         EnsurePackLoaded(sender);
@@ -409,7 +427,7 @@ public sealed class PreviewCanvas : UserControl
         {
             drawing.FillRectangle(
                 new Rect(viewport.Left, viewport.Top, viewport.Width, viewport.Height),
-                Windows.UI.Color.FromArgb(255, 22, 27, 38));
+                Windows.UI.Color.FromArgb(255, 0, 0, 0));
         }
         drawing.DrawRectangle(
             new Rect(viewport.Left, viewport.Top, viewport.Width, viewport.Height),
@@ -452,7 +470,13 @@ public sealed class PreviewCanvas : UserControl
         var destination = new Rect((width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
         var source = new Rect(0, 0, _background.Size.Width, _background.Size.Height);
         var blur = _backgroundEffect ?? new GaussianBlurEffect { Source = _background, BlurAmount = 10.5f };
-        drawing.DrawImage(blur, destination, source, 0.35f);
+        var opacity = (float)Math.Clamp(_backgroundBrightness, 0, 1);
+        if (opacity <= 0)
+        {
+            return;
+        }
+
+        drawing.DrawImage(blur, destination, source, opacity);
     }
 
     private enum PassKind { Line, Hold, Note }
@@ -1040,7 +1064,9 @@ public sealed class PreviewCanvas : UserControl
                     _guideLayouts.Clear();
                 }
 
-                layout = new CanvasTextLayout(creator, label, CanvasExtensions.TextFormat(fontSize), 2000, 200)
+                // maxWidth=0 表示不限制宽度；LayoutBounds 才是文字实际范围。
+                // 之前用 2000 的宽度再在原点绘制，会把居中文字整体推到视口外。
+                layout = new CanvasTextLayout(creator, label, CanvasExtensions.TextFormat(fontSize), 0, 0)
                 {
                     HorizontalAlignment = CanvasHorizontalAlignment.Center,
                     VerticalAlignment = CanvasVerticalAlignment.Top,
@@ -1051,7 +1077,10 @@ public sealed class PreviewCanvas : UserControl
             var oldTransform = drawing.Transform;
             drawing.Transform = Matrix3x2.CreateRotation((float)(group.Rotation * Math.PI / 180)) *
                                 Matrix3x2.CreateTranslation(group.X, group.Y) * oldTransform;
-            drawing.DrawTextLayout(layout, new Vector2(0, 4 * scale), selected ? selectedColor : normalColor);
+            var bounds = layout.LayoutBounds;
+            var textX = (float)(-bounds.Width / 2 - bounds.X);
+            var textY = (float)(4 * scale - bounds.Y);
+            drawing.DrawTextLayout(layout, new Vector2(textX, textY), selected ? selectedColor : normalColor);
             if (selected)
             {
                 if (arrow is not null)

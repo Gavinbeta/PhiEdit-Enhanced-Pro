@@ -1008,6 +1008,9 @@ public sealed class PreviewCanvas : UserControl
         var arrow = _textures["Arrow2.png"];
         var margin = 60 * scale;
 
+        // 先画普通白色线号，最后画当前线绿色线号，保证它压在其他线号之上。
+        for (var pass = 0; pass < 2; pass++)
+        {
         for (var index = 0; index < states.Count; index++)
         {
             var state = states[index];
@@ -1025,6 +1028,11 @@ public sealed class PreviewCanvas : UserControl
             }
 
             var selected = index == selectedLine;
+            if (pass == 0 ? selected : !selected)
+            {
+                continue;
+            }
+
             var label = index.ToString(CultureInfo.InvariantCulture);
             var fontSize = Math.Max(1, (int)Math.Round((selected ? 48 : 30) * scale));
             var key = (label, fontSize, selected);
@@ -1074,6 +1082,7 @@ public sealed class PreviewCanvas : UserControl
             }
 
             drawing.Transform = oldTransform;
+        }
         }
     }
 

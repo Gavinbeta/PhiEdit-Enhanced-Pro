@@ -514,10 +514,22 @@ public sealed class PreviewCanvas : UserControl
             var centerX = originX + (float)(state.X * scale);
             var centerY = originY - (float)(state.Y * scale);
             var oldTransform = drawing.Transform;
-            drawing.Transform = Matrix3x2.CreateRotation((float)(state.Rotation * Math.PI / 180), new Vector2(centerX, centerY));
+            var angleRad = state.Rotation * Math.PI / 180;
+            var cosine = Math.Cos(angleRad);
+            var sine = Math.Sin(angleRad);
+            drawing.Transform = Matrix3x2.CreateRotation((float)angleRad, new Vector2(centerX, centerY));
 
             if (pass == PassKind.Line)
             {
+                var halfWidth = Math.Abs(DefaultLineWidth * state.ScaleX * scale) / 2 + 32;
+                var halfHeight = Math.Abs(24 * state.ScaleY * scale) + 32;
+                if (centerX + halfWidth < viewport.Left || centerX - halfWidth > viewport.Left + viewport.Width ||
+                    centerY + halfHeight < viewport.Top || centerY - halfHeight > viewport.Top + viewport.Height)
+                {
+                    drawing.Transform = oldTransform;
+                    continue;
+                }
+
                 DrawLine(drawing, creator, runtime, state, centerX, centerY, scale, index == selectedLine);
             }
             else
@@ -568,6 +580,25 @@ public sealed class PreviewCanvas : UserControl
                     var textureScale = highlight && pack is not null ? pack.HighlightScale : 1;
                     noteWidth *= (float)textureScale;
                     heightWidth *= (float)textureScale;
+
+                    // 参考 preview.mjs drawScene 的 cullNotes：只丢弃完全在视口外的音符，
+                    // 大型谱面中可显著减少贴图与斜切变换次数。
+                    var worldX = state.X + localX * cosine + localY * sine;
+                    var worldY = -state.Y + localX * sine - localY * cosine;
+                    var tailWorldX = state.X + localX * cosine + localTail * sine;
+                    var tailWorldY = -state.Y + localX * sine - localTail * cosine;
+                    var screenX = originX + (float)(worldX * scale);
+                    var screenY = originY + (float)(worldY * scale);
+                    var tailX = originX + (float)(tailWorldX * scale);
+                    var tailYWorld = originY + (float)(tailWorldY * scale);
+                    var padding = Math.Max(40, Math.Abs(noteWidth) + Math.Abs(heightWidth) * 0.6f);
+                    if (Math.Max(screenX, tailX) + padding < viewport.Left ||
+                        Math.Min(screenX, tailX) - padding > viewport.Left + viewport.Width ||
+                        Math.Max(screenY, tailYWorld) + padding < viewport.Top ||
+                        Math.Min(screenY, tailYWorld) - padding > viewport.Top + viewport.Height)
+                    {
+                        continue;
+                    }
 
                     var noteTransform = drawing.Transform;
                     if (Math.Abs(position.Skew) > 1e-6)
@@ -1063,19 +1094,15 @@ public sealed class PreviewCanvas : UserControl
             }
 
             var oldTransform = drawing.Transform;
-            drawing.Transform = Matrix3x2.CreateRotation((float)(state.Rotation * Math.PI / 180)) *
+            var baseTransform = Matrix3x2.CreateRotation((float)(state.Rotation * Math.PI / 180)) *
                                 Matrix3x2.CreateTranslation(x, y) * oldTransform;
-            var bounds = layout.LayoutBounds;
-            var textX = (float)(-bounds.Width / 2 - bounds.X);
-            var textY = (float)((selected ? -6 : 4) * scale - bounds.Y);
-            drawing.DrawTextLayout(layout, new Vector2(textX, textY), selected ? selectedColor : normalColor);
 
             if (selected)
             {
+                drawing.Transform = Matrix3x2.CreateRotation((float)Math.PI) * baseTransform;
                 if (arrow is not null)
                 {
                     var size = 50 * scale;
-                    drawing.Transform = Matrix3x2.CreateRotation((float)Math.PI) * drawing.Transform;
                     drawing.DrawImage(arrow,
                         new Rect(-size / 2, -size / 2, size, size),
                         new Rect(0, 0, arrow.Size.Width, arrow.Size.Height), 1);
@@ -1087,6 +1114,11 @@ public sealed class PreviewCanvas : UserControl
                 }
             }
 
+            drawing.Transform = baseTransform;
+            var bounds = layout.LayoutBounds;
+            var textX = (float)(-bounds.Width / 2 - bounds.X);
+            var textY = (float)((selected ? 22 : 4) * scale - bounds.Y);
+            drawing.DrawTextLayout(layout, new Vector2(textX, textY), selected ? selectedColor : normalColor);
             drawing.Transform = oldTransform;
         }
         }

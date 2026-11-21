@@ -884,14 +884,14 @@ public sealed class PreviewCanvas : UserControl
         var aspectRatio = viewport.Height > 0 ? viewport.Width / viewport.Height : 1.5;
         var positionScale = PreviewViewport.PositionScale(aspectRatio);
         const double lifetime = 2.0 / 3.0;
-        var samples = new Dictionary<long, IReadOnlyList<LineState>>();
+        var samples = new Dictionary<long, Func<int, LineState?>>();
 
-        IReadOnlyList<LineState> SampleAt(double time)
+        Func<int, LineState?> SampleAt(double time)
         {
             var key = (long)Math.Round(time * 1_000_000);
             if (!samples.TryGetValue(key, out var result))
             {
-                result = _scene.Sample(time, positionScale);
+                result = _scene.Sampler(time, positionScale);
                 samples[key] = result;
             }
 
@@ -916,13 +916,12 @@ public sealed class PreviewCanvas : UserControl
                     continue;
                 }
 
-                var hitStates = SampleAt(time);
-                if (index >= hitStates.Count)
+                var hitState = SampleAt(time)(index);
+                if (hitState is null)
                 {
                     continue;
                 }
 
-                var hitState = hitStates[index];
                 var position = runtime.NoteState(entry, hitState, time);
                 if (runtime.Line.Father < 0 && (positionScale.X != 1 || positionScale.Y != 1))
                 {
@@ -1117,7 +1116,7 @@ public sealed class PreviewCanvas : UserControl
             drawing.Transform = baseTransform;
             var bounds = layout.LayoutBounds;
             var textX = (float)(-bounds.Width / 2 - bounds.X);
-            var textY = (float)((selected ? 22 : 4) * scale - bounds.Y);
+            var textY = (float)((selected ? 8 : 4) * scale - bounds.Y);
             drawing.DrawTextLayout(layout, new Vector2(textX, textY), selected ? selectedColor : normalColor);
             drawing.Transform = oldTransform;
         }

@@ -378,11 +378,15 @@ public sealed class SceneRuntime
         _compiledGeneration = _generation;
     }
 
-    public IReadOnlyList<LineState> Sample(double seconds, (double X, double Y) positionScale = default)
+    /// <summary>
+    /// 参考 scene.mjs sampler：返回按需解析的采样器，只在真正需要某条线时才计算其状态。
+    /// 打击特效等场景只需少数几条线的历史状态，避免每个时间点都重算整份谱面。
+    /// </summary>
+    public Func<int, LineState?> Sampler(double seconds, (double X, double Y) positionScale = default)
     {
-        if (_chart is null || _tempo is null || Lines.Count == 0)
+        if (_chart is null || Lines.Count == 0)
         {
-            return Array.Empty<LineState>();
+            return _ => null;
         }
 
         var scaleX = positionScale.X == 0 ? 1 : positionScale.X;
@@ -431,17 +435,24 @@ public sealed class SceneRuntime
             return state;
         }
 
-        for (var index = 0; index < Lines.Count; index++)
+        return Resolve;
+    }
+
+    public IReadOnlyList<LineState> Sample(double seconds, (double X, double Y) positionScale = default)
+    {
+        if (Lines.Count == 0)
         {
-            Resolve(index);
-            if (states[index] is null)
-            {
-                var local = Lines[index].State(seconds);
-                states[index] = local with { X = local.X * scaleX, Y = local.Y * scaleY };
-            }
+            return Array.Empty<LineState>();
         }
 
-        return states.Select(state => state!).ToList();
+        var sampler = Sampler(seconds, positionScale);
+        var result = new LineState[Lines.Count];
+        for (var index = 0; index < Lines.Count; index++)
+        {
+            result[index] = sampler(index)!;
+        }
+
+        return result;
     }
 }
 

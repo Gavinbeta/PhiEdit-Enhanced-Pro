@@ -63,7 +63,7 @@ public sealed partial class PreviewWindow : Window
                 _audio.Rate = _clock.Rate;
                 _audio.Seek(_clock.CurrentSeconds);
                 PreviewSurface.Clock = _audio;
-                AudioStatus.Text = $"{_audio.Status} · 10ms";
+                AudioStatus.Text = _audio.Status;
                 UpdateTimeReadout();
             });
         }

@@ -1,4 +1,3 @@
-using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using PhiEdit.Core.Charts;
 using PhiEdit.Core.Editing;
@@ -9,7 +8,7 @@ namespace PhiEdit.App.Services.Audio;
 
 /// <summary>
 /// 低延迟预览音频引擎。背景音乐与每条判定线的命中音分总线混音，
-/// 全部 PCM 预解码，WASAPI 事件驱动小缓冲，目标输出延迟 10ms。
+/// 全部 PCM 预解码，命中音按采样点插入；输出走普通系统音频会话，音量由系统控制。
 /// </summary>
 public sealed class PreviewAudioEngine : IPreviewTimeSource, IDisposable
 {
@@ -54,7 +53,7 @@ public sealed class PreviewAudioEngine : IPreviewTimeSource, IDisposable
         _mixer.Configure(result.Music, session.Document.OffsetMilliseconds, result.Sounds, result.Hits, result.Buses);
         Buses = result.Buses;
         InitializeOutput();
-        Status = result.Music is null ? "背景音缺失，仅命中音可用" : "音频就绪";
+        Status = result.Music is null ? "背景音缺失，仅命中音可用" : "系统输出就绪";
     }
 
     public void Play()
@@ -100,19 +99,15 @@ public sealed class PreviewAudioEngine : IPreviewTimeSource, IDisposable
 
     private IWavePlayer CreateOutput()
     {
-        // 独占事件驱动 + 10ms 缓冲可把调度误差压到缓冲区级别；不支持时退回共享 20ms。
-        try
+        // 使用普通系统音频输出：与浏览器/播放器共用设备，音量由系统音量混合器控制。
+        // 不再使用 WASAPI 独占模式，避免独占设备导致其他程序视频卡顿、且系统音量无效。
+        var output = new WaveOutEvent
         {
-            var exclusive = new WasapiOut(AudioClientShareMode.Exclusive, true, 10);
-            exclusive.Init(_mixer.ToWaveProvider());
-            return exclusive;
-        }
-        catch
-        {
-            var shared = new WasapiOut(AudioClientShareMode.Shared, true, 20);
-            shared.Init(_mixer.ToWaveProvider());
-            return shared;
-        }
+            DesiredLatency = 60,
+            NumberOfBuffers = 3,
+        };
+        output.Init(new WaveFloatTo16Provider(_mixer.ToWaveProvider()));
+        return output;
     }
 
     private static MixerData BuildMixerData(EditorSession session, NoteSkin? skin)

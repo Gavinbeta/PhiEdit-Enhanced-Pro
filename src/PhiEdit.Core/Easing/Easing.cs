@@ -38,45 +38,46 @@ public static class Easing
     /// <summary>按序号取缓动曲线（1 起）。</summary>
     public static double Curve(int type, double progress)
     {
+        // 与参考 easing.mjs 的 curves[type - 1] 对齐：type=1 对应下面的 0 号曲线。
         return (type - 1) switch
         {
-            1 => progress,
-            2 => Math.Sin(progress * HalfPi),
-            3 => 1 - Math.Cos(progress * HalfPi),
-            4 => 1 - Math.Pow(1 - progress, 2),
-            5 => progress * progress,
-            6 => (1 - Math.Cos(Math.PI * progress)) / 2,
-            7 => progress < 0.5 ? 2 * progress * progress : 1 - Math.Pow(-2 * progress + 2, 2) / 2,
-            8 => 1 - Math.Pow(1 - progress, 3),
-            9 => Math.Pow(progress, 3),
-            10 => 1 - Math.Pow(1 - progress, 4),
-            11 => Math.Pow(progress, 4),
-            12 => progress < 0.5 ? 4 * Math.Pow(progress, 3) : 1 - Math.Pow(-2 * progress + 2, 3) / 2,
-            13 => progress < 0.5 ? 8 * Math.Pow(progress, 4) : 1 - Math.Pow(-2 * progress + 2, 4) / 2,
-            14 => 1 - Math.Pow(1 - progress, 5),
-            15 => Math.Pow(progress, 5),
-            16 => progress == 1 ? 1 : 1 - Math.Pow(2, -10 * progress),
-            17 => progress == 0 ? 0 : Math.Pow(2, 10 * progress - 10),
-            18 => Math.Sqrt(1 - Math.Pow(progress - 1, 2)),
-            19 => 1 - Math.Sqrt(Math.Abs(1 - progress * progress)),
-            20 => 1 + (Back + 1) * Math.Pow(progress - 1, 3) + Back * Math.Pow(progress - 1, 2),
-            21 => (Back + 1) * Math.Pow(progress, 3) - Back * progress * progress,
-            22 => progress < 0.5
+            0 => progress,
+            1 => Math.Sin(progress * HalfPi),
+            2 => 1 - Math.Cos(progress * HalfPi),
+            3 => 1 - Math.Pow(1 - progress, 2),
+            4 => progress * progress,
+            5 => (1 - Math.Cos(Math.PI * progress)) / 2,
+            6 => progress < 0.5 ? 2 * progress * progress : 1 - Math.Pow(-2 * progress + 2, 2) / 2,
+            7 => 1 - Math.Pow(1 - progress, 3),
+            8 => Math.Pow(progress, 3),
+            9 => 1 - Math.Pow(1 - progress, 4),
+            10 => Math.Pow(progress, 4),
+            11 => progress < 0.5 ? 4 * Math.Pow(progress, 3) : 1 - Math.Pow(-2 * progress + 2, 3) / 2,
+            12 => progress < 0.5 ? 8 * Math.Pow(progress, 4) : 1 - Math.Pow(-2 * progress + 2, 4) / 2,
+            13 => 1 - Math.Pow(1 - progress, 5),
+            14 => Math.Pow(progress, 5),
+            15 => progress == 1 ? 1 : 1 - Math.Pow(2, -10 * progress),
+            16 => progress == 0 ? 0 : Math.Pow(2, 10 * progress - 10),
+            17 => Math.Sqrt(1 - Math.Pow(progress - 1, 2)),
+            18 => 1 - Math.Sqrt(Math.Abs(1 - progress * progress)),
+            19 => 1 + (Back + 1) * Math.Pow(progress - 1, 3) + Back * Math.Pow(progress - 1, 2),
+            20 => (Back + 1) * Math.Pow(progress, 3) - Back * progress * progress,
+            21 => progress < 0.5
                 ? (1 - Math.Sqrt(1 - Math.Pow(2 * progress, 2))) / 2
                 : (Math.Sqrt(1 - Math.Pow(-2 * progress + 2, 2)) + 1) / 2,
-            23 => progress < 0.5
+            22 => progress < 0.5
                 ? Math.Pow(2 * progress, 2) * ((BackInOut + 1) * 2 * progress - BackInOut) / 2
                 : (Math.Pow(2 * progress - 2, 2) * ((BackInOut + 1) * (2 * progress - 2) + BackInOut) + 2) / 2,
-            24 => progress == 0 || progress == 1
+            23 => progress == 0 || progress == 1
                 ? progress
                 : Math.Pow(2, -10 * progress) * Math.Sin((progress * 10 - 0.75) * Elastic) + 1,
-            25 => progress == 0 || progress == 1
+            24 => progress == 0 || progress == 1
                 ? progress
                 : -(Math.Pow(2, 10 * progress - 10)) * Math.Sin((progress * 10 - 10.75) * Elastic),
-            26 => BounceOut(progress),
-            27 => 1 - BounceOut(1 - progress),
-            28 => progress < 0.5 ? (1 - BounceOut(1 - 2 * progress)) / 2 : (1 + BounceOut(2 * progress - 1)) / 2,
-            29 => progress == 0 || progress == 1
+            25 => BounceOut(progress),
+            26 => 1 - BounceOut(1 - progress),
+            27 => progress < 0.5 ? (1 - BounceOut(1 - 2 * progress)) / 2 : (1 + BounceOut(2 * progress - 1)) / 2,
+            28 => progress == 0 || progress == 1
                 ? progress
                 : progress < 0.5
                     ? -(Math.Pow(2, 20 * progress - 10) * Math.Sin((20 * progress - 11.125) * ElasticInOut)) / 2

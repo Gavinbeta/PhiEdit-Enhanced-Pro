@@ -10,7 +10,7 @@ public sealed class LineAudioBus
     public bool Solo { get; set; }
 }
 
-public readonly record struct ScheduledHit(long TimeSamples, int SoundIndex, int LineIndex);
+public readonly record struct ScheduledHit(long TimeSamples, int SoundIndex, int LineIndex, int Count = 1);
 
 internal sealed class ActiveVoice
 {

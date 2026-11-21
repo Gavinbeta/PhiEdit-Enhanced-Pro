@@ -11,6 +11,7 @@ using PhiEdit.Core.Editing;
 using PhiEdit.Core.IO;
 using PhiEdit.Core.Preview;
 using PhiEdit.Core.Skins;
+using System.Globalization;
 using System.Numerics;
 using Windows.Foundation;
 using EasingMath = PhiEdit.Core.Easing.Easing;
@@ -41,6 +42,7 @@ public sealed class PreviewCanvas : UserControl
     private readonly NoteSkinRenderer _packRenderer = new();
     private readonly TintedBitmapCache _tintCache = new();
     private readonly Dictionary<(string Text, int Size), CanvasTextLayout> _textLayouts = new();
+    private readonly Dictionary<(string Text, int Size), CanvasTextLayout> _guideLayouts = new();
     private readonly Dictionary<string, CanvasBitmap> _assetTextures = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _loadingTextures = new(StringComparer.OrdinalIgnoreCase);
     private EditorSession? _session;
@@ -424,10 +426,12 @@ public sealed class PreviewCanvas : UserControl
         var visibleCache = new Dictionary<int, IReadOnlyList<NoteEntry>>();
         using (drawing.CreateLayer(1, new Rect(viewport.Left, viewport.Top, viewport.Width, viewport.Height)))
         {
-            DrawPass(drawing, sender, PassKind.Line, states, originX, originY, scale, viewport, seconds, visibleCache);
-            DrawPass(drawing, sender, PassKind.Hold, states, originX, originY, scale, viewport, seconds, visibleCache);
-            DrawPass(drawing, sender, PassKind.Note, states, originX, originY, scale, viewport, seconds, visibleCache);
+            var selectedLine = _session?.CurrentLineIndex ?? -1;
+            DrawPass(drawing, sender, PassKind.Line, states, originX, originY, scale, viewport, selectedLine, seconds, visibleCache);
+            DrawPass(drawing, sender, PassKind.Hold, states, originX, originY, scale, viewport, selectedLine, seconds, visibleCache);
+            DrawPass(drawing, sender, PassKind.Note, states, originX, originY, scale, viewport, selectedLine, seconds, visibleCache);
             DrawHits(drawing, states, originX, originY, scale, seconds, viewport);
+            DrawGuides(drawing, sender, states, scale, selectedLine, viewport);
         }
 
         var format = CanvasExtensions.TextFormat(12);
@@ -455,7 +459,7 @@ public sealed class PreviewCanvas : UserControl
 
     private void DrawPass(CanvasDrawingSession drawing, ICanvasResourceCreator creator, PassKind pass,
         IReadOnlyList<LineState> states, float originX, float originY, float scale, PreviewViewport viewport,
-        double seconds, Dictionary<int, IReadOnlyList<NoteEntry>> visibleCache)
+        int selectedLine, double seconds, Dictionary<int, IReadOnlyList<NoteEntry>> visibleCache)
     {
         var aspectRatio = viewport.Height > 0 ? viewport.Width / viewport.Height : 1.5;
         var positionScale = PreviewViewport.PositionScale(aspectRatio);
@@ -484,7 +488,7 @@ public sealed class PreviewCanvas : UserControl
 
             if (pass == PassKind.Line)
             {
-                DrawLine(drawing, creator, runtime, state, centerX, centerY, scale);
+                DrawLine(drawing, creator, runtime, state, centerX, centerY, scale, index == selectedLine);
             }
             else
             {
@@ -556,17 +560,20 @@ public sealed class PreviewCanvas : UserControl
     }
 
     private void DrawLine(CanvasDrawingSession drawing, ICanvasResourceCreator creator,
-        LineRuntime runtime, LineState state, float centerX, float centerY, float scale)
+        LineRuntime runtime, LineState state, float centerX, float centerY, float scale, bool selected)
     {
         var line = runtime.Line;
         var isDefault = string.IsNullOrEmpty(line.Texture) || line.Texture == "line.png";
         var alpha = (float)Math.Clamp(state.Alpha / 255, 0, 1);
+        var pack = _packRenderer.IsReady ? _packRenderer.Skin : null;
         double[] lineColor = state.Color;
 
-        // 参考 preview.mjs：资源包的 perfectColor 会覆盖默认判定线颜色，
-        // 其 alpha 也要乘进判定线透明度；有自定义贴图/文字/颜色事件时不覆盖。
-        var pack = _packRenderer.IsReady ? _packRenderer.Skin : null;
-        if (pack is not null && isDefault && !line.AttachUI &&
+        // 参考 preview.mjs drawScene：正在编辑的判定线染成绿色，优先于资源包 perfectColor。
+        if (selected)
+        {
+            lineColor = new double[] { 0, 200, 0 };
+        }
+        else if (pack is not null && isDefault && !line.AttachUI &&
             !runtime.HasTextEvents && !runtime.HasColorEvents)
         {
             var perfect = pack.Info.ColorPerfect;
@@ -945,6 +952,149 @@ public sealed class PreviewCanvas : UserControl
                 }
             }
         }
+    }
+
+    private sealed class GuideGroup
+    {
+        public GuideGroup(float x, float y, float rotation, int index)
+        {
+            X = x;
+            Y = y;
+            Rotation = rotation;
+            Indices.Add(index);
+        }
+
+        public float X { get; }
+        public float Y { get; }
+        public float Rotation { get; }
+        public List<int> Indices { get; } = new();
+    }
+
+    /// <summary>
+    /// 参考 preview.mjs drawGuides：中心菱形方向箭头 + 合并后的判定线编号。
+    /// 当前编辑线为绿色，其余为白色；该辅助层不受判定线透明度影响。
+    /// </summary>
+    private void DrawGuides(CanvasDrawingSession drawing, ICanvasResourceCreator creator,
+        IReadOnlyList<LineState> states, float scale, int selectedLine, PreviewViewport viewport)
+    {
+        var originX = viewport.Left + viewport.Width / 2;
+        var originY = viewport.Top + viewport.Height / 2;
+        var groups = new List<GuideGroup>();
+        var radius = Math.Max(1, 10 * scale);
+        for (var index = 0; index < states.Count; index++)
+        {
+            if (!double.IsFinite(states[index].X) || !double.IsFinite(states[index].Y) ||
+                !double.IsFinite(states[index].Rotation))
+            {
+                continue;
+            }
+
+            var x = (float)(originX + states[index].X * scale);
+            var y = (float)(originY - states[index].Y * scale);
+            var margin = 60 * scale;
+            if (x < viewport.Left - margin || x > viewport.Left + viewport.Width + margin ||
+                y < viewport.Top - margin || y > viewport.Top + viewport.Height + margin)
+            {
+                continue;
+            }
+
+            GuideGroup? group = null;
+            foreach (var candidate in groups)
+            {
+                var dx = candidate.X - x;
+                var dy = candidate.Y - y;
+                if (Math.Abs(candidate.Rotation - states[index].Rotation) < 0.01 &&
+                    Math.Sqrt(dx * dx + dy * dy) < radius)
+                {
+                    group = candidate;
+                    break;
+                }
+            }
+
+            if (group is null)
+            {
+                groups.Add(new GuideGroup(x, y, (float)states[index].Rotation, index));
+            }
+            else
+            {
+                group.Indices.Add(index);
+            }
+        }
+
+        var fontSize = Math.Max(1, (int)Math.Round(30 * scale));
+        var selectedColor = Windows.UI.Color.FromArgb(255, 0, 200, 0);
+        var normalColor = Windows.UI.Color.FromArgb(255, 255, 255, 255);
+        var arrow = _textures["Arrow2.png"];
+        foreach (var group in groups)
+        {
+            var selected = group.Indices.Contains(selectedLine);
+            var label = FormatLineNumbers(group.Indices);
+            if (!_guideLayouts.TryGetValue((label, fontSize), out var layout))
+            {
+                if (_guideLayouts.Count >= 256)
+                {
+                    foreach (var old in _guideLayouts.Values)
+                    {
+                        old.Dispose();
+                    }
+                    _guideLayouts.Clear();
+                }
+
+                layout = new CanvasTextLayout(creator, label, CanvasExtensions.TextFormat(fontSize), 2000, 200)
+                {
+                    HorizontalAlignment = CanvasHorizontalAlignment.Center,
+                    VerticalAlignment = CanvasVerticalAlignment.Top,
+                };
+                _guideLayouts[(label, fontSize)] = layout;
+            }
+
+            var oldTransform = drawing.Transform;
+            drawing.Transform = Matrix3x2.CreateRotation((float)(group.Rotation * Math.PI / 180)) *
+                                Matrix3x2.CreateTranslation(group.X, group.Y) * oldTransform;
+            drawing.DrawTextLayout(layout, new Vector2(0, 4 * scale), selected ? selectedColor : normalColor);
+            if (selected)
+            {
+                if (arrow is not null)
+                {
+                    var size = 50 * scale;
+                    drawing.Transform = Matrix3x2.CreateRotation((float)Math.PI) * drawing.Transform;
+                    drawing.DrawImage(arrow,
+                        new Rect(-size / 2, -size / 2, size, size),
+                        new Rect(0, 0, arrow.Size.Width, arrow.Size.Height), 1);
+                }
+                else
+                {
+                    var color = normalColor;
+                    drawing.DrawLine(new Vector2(0, -24 * scale), new Vector2(-12 * scale, -8 * scale), color, 2);
+                    drawing.DrawLine(new Vector2(0, -24 * scale), new Vector2(12 * scale, -8 * scale), color, 2);
+                }
+            }
+
+            drawing.Transform = oldTransform;
+        }
+    }
+
+    private string FormatLineNumbers(IEnumerable<int> indices)
+    {
+        var sorted = indices.OrderBy(index => index).ToArray();
+        var parts = new List<string>();
+        for (var index = 0; index < sorted.Length; index++)
+        {
+            var first = sorted[index];
+            var last = first;
+            while (index + 1 < sorted.Length && sorted[index + 1] == last + 1 &&
+                   _scene.Lines[first].Line.Father < 0 && _scene.Lines[sorted[index + 1]].Line.Father < 0)
+            {
+                last = sorted[++index];
+            }
+
+            var father = _scene.Lines[first].Line.Father;
+            parts.Add(last == first
+                ? father >= 0 ? $"{first}({father})" : first.ToString(CultureInfo.InvariantCulture)
+                : $"{first}–{last}");
+        }
+
+        return string.Join(", ", parts);
     }
 
     private static bool InViewport(Rect rect, PreviewViewport viewport) =>

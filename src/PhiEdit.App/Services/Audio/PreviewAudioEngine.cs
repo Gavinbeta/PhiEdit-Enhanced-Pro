@@ -61,9 +61,10 @@ public sealed class PreviewAudioEngine : IPreviewTimeSource, IDisposable
         _output.Init(_mixer.ToWaveProvider());
         _playing = false;
 
+        var hitCount = data.Hits.Sum(hit => hit.Count);
         Status = data.Music is null
-            ? $"背景音缺失 · 命中音 {data.Hits.Length} · {OutputKind}"
-            : $"音频就绪 · 命中音 {data.Hits.Length} · {OutputKind}";
+            ? $"背景音缺失 · 命中音 {hitCount} · {OutputKind}"
+            : $"音频就绪 · 命中音 {hitCount} · {OutputKind}";
     }
 
     public void Play()
@@ -133,7 +134,7 @@ public sealed class PreviewAudioEngine : IPreviewTimeSource, IDisposable
         var sounds = new List<PcmAudioBuffer>();
         var soundIndices = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var buses = Enumerable.Range(0, document.Lines.Count).Select(_ => new LineAudioBus()).ToArray();
-        var hits = new List<ScheduledHit>();
+        var hitGroups = new Dictionary<(long Time, int Sound), ScheduledHit>();
 
         int ResolveSound(string name)
         {
@@ -188,8 +189,16 @@ public sealed class PreviewAudioEngine : IPreviewTimeSource, IDisposable
                 }
 
                 var seconds = tempo.SecondsAt(note.StartBeat.Value, line.BpmFactor) + offsetSeconds;
-                hits.Add(new ScheduledHit(
-                    (long)Math.Round(seconds * PcmAudioBuffer.SampleRate), index, lineIndex));
+                var sample = (long)Math.Round(seconds * PcmAudioBuffer.SampleRate);
+                var key = (sample, index);
+                if (hitGroups.TryGetValue(key, out var existing))
+                {
+                    hitGroups[key] = existing with { Count = existing.Count + 1 };
+                }
+                else
+                {
+                    hitGroups[key] = new ScheduledHit(sample, index, lineIndex);
+                }
             }
         }
 
@@ -212,7 +221,7 @@ public sealed class PreviewAudioEngine : IPreviewTimeSource, IDisposable
         }
 
         return new AudioData(music, musicOffsetSamples, sounds.ToArray(),
-            hits.OrderBy(hit => hit.TimeSamples).ToArray(), buses);
+            hitGroups.Values.OrderBy(hit => hit.TimeSamples).ToArray(), buses);
     }
 
     private sealed record AudioData(

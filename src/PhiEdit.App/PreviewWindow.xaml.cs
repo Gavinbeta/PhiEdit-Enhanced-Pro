@@ -179,6 +179,11 @@ public sealed partial class PreviewWindow : Window
 
     private void OnPreviewOptionsFlyoutOpening(object sender, object e)
     {
+        if (PreviewSurface is null)
+        {
+            return;
+        }
+
         var options = PreviewSurface.Options;
         LineNumbersCheck.IsChecked = options.ShowLineNumbers;
         LineDirectionCheck.IsChecked = options.ShowLineDirection;
@@ -189,6 +194,13 @@ public sealed partial class PreviewWindow : Window
 
     private void OnPreviewOptionChanged(object sender, RoutedEventArgs e)
     {
+        // XAML 初始赋 IsChecked 时会先触发事件，此时命名控件可能尚未全部赋值。
+        if (PreviewSurface is null || LineNumbersCheck is null || LineDirectionCheck is null ||
+            GameUiCheck is null || HitEffectsCheck is null)
+        {
+            return;
+        }
+
         var options = PreviewSurface.Options;
         options.ShowLineNumbers = LineNumbersCheck.IsChecked == true;
         options.ShowLineDirection = LineDirectionCheck.IsChecked == true;
@@ -198,7 +210,7 @@ public sealed partial class PreviewWindow : Window
 
     private void OnLineColorModeChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (LineColorBox.SelectedIndex < 0)
+        if (PreviewSurface is null || LineColorBox is null || LineColorBox.SelectedIndex < 0)
         {
             return;
         }

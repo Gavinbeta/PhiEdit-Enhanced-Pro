@@ -456,37 +456,41 @@ public sealed class PreviewCanvas : UserControl
         }
 
         var pausePosition = Layout(0.021, 0.838, -1, 1);
+        var comboPosition = Layout(0.3516, 0.825, 0, 1);
+        var labelPosition = Layout(0.3516, 0.7833, 0, 1);
+        var barPosition = Layout(0, 0.863, -1, 1);
+        var scorePosition = Layout(0.6855, 0.8458, 1, 1);
+        var namePosition = Layout(0.02, 0.05417, -1, -1);
+        var levelPosition = Layout(0.6855, 0.05417, 1, -1);
+
+        // 参考中 pause 的 anchorY=1 是 top，不是 bottom；顶部 HUD 的视觉顶端与分数对齐。
+        var topY = scorePosition.Y;
 
         var pause = _textures["Pause.png"];
         if (pause is not null)
         {
             var size = 42 * scale;
             drawing.DrawImage(pause,
-                new Rect(pausePosition.X, pausePosition.Y - size, size, size),
+                new Rect(pausePosition.X, topY, size, size),
                 new Rect(0, 0, pause.Size.Width, pause.Size.Height), 1);
         }
 
         var progress = Math.Clamp((seconds + _session.Document.OffsetMilliseconds / 1000.0) /
             Math.Max(0.001, _hudDuration), 0, 1);
-        var barPosition = Layout(0, 0.863, -1, 1);
         drawing.FillRectangle(new Rect(barPosition.X, barPosition.Y - 4 * scale,
             viewport.Width * progress, 8 * scale), white);
 
         if (combo >= 3)
         {
-            var comboPosition = Layout(0.3516, 0.825, 0, 1);
-            var labelPosition = Layout(0.3516, 0.7833, 0, 1);
+            var comboSize = 67 * scale;
             DrawUiText(drawing, combo.ToString(CultureInfo.InvariantCulture),
-                comboPosition.X, comboPosition.Y, 67 * scale, white, center: true, middle: true);
+                comboPosition.X, topY, comboSize, white, center: true);
             DrawUiText(drawing, "combo",
-                labelPosition.X, labelPosition.Y, 35 * scale, white, center: true, middle: true);
+                labelPosition.X, topY + comboSize, 35 * scale, white, center: true);
         }
 
-        var scorePosition = Layout(0.6855, 0.8458, 1, 1);
-        var namePosition = Layout(0.02, 0.05417, -1, -1);
-        var levelPosition = Layout(0.6855, 0.05417, 1, -1);
         DrawUiText(drawing, ((long)Math.Round(score)).ToString("D7", CultureInfo.InvariantCulture),
-            scorePosition.X, scorePosition.Y, 49 * scale, white, right: true);
+            scorePosition.X, topY, 49 * scale, white, right: true);
         DrawUiText(drawing, _session.Document.SongName,
             namePosition.X, namePosition.Y, 35 * scale, white, bottom: true);
         DrawUiText(drawing, _session.Document.Difficulty,

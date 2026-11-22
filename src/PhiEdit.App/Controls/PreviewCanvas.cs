@@ -464,7 +464,7 @@ public sealed class PreviewCanvas : UserControl
         {
             DrawUiText(drawing, combo.ToString(CultureInfo.InvariantCulture),
                 X(0.072), Y(405), 67 * scale, white, center: true, middle: true);
-            DrawUiText(drawing, "AUTOPLAY",
+            DrawUiText(drawing, "combo",
                 X(0.072), Y(360), 35 * scale, white, center: true, middle: true);
         }
 

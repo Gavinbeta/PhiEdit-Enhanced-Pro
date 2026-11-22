@@ -28,7 +28,7 @@ public sealed partial class PreviewWindow : Window
     {
         _session = session;
         InitializeComponent();
-        PreviewSurface.BackgroundBrightness = Math.Clamp(BackgroundBrightnessSlider.Value / 100.0, 0, 1);
+        PreviewSurface.Options.BackgroundBrightness = Math.Clamp(BackgroundBrightnessSlider.Value / 100.0, 0, 1);
 
         AppWindow.Resize(new SizeInt32(1200, 800));
         PreviewSurface.Session = session;
@@ -174,7 +174,38 @@ public sealed partial class PreviewWindow : Window
             return;
         }
 
-        PreviewSurface.BackgroundBrightness = Math.Clamp(e.NewValue / 100.0, 0, 1);
+        PreviewSurface.Options.BackgroundBrightness = Math.Clamp(e.NewValue / 100.0, 0, 1);
+    }
+
+    private void OnPreviewOptionsFlyoutOpening(object sender, object e)
+    {
+        var options = PreviewSurface.Options;
+        LineNumbersCheck.IsChecked = options.ShowLineNumbers;
+        LineDirectionCheck.IsChecked = options.ShowLineDirection;
+        GameUiCheck.IsChecked = options.ShowGameUi;
+        HitEffectsCheck.IsChecked = options.ShowHitEffects;
+        LineColorBox.SelectedIndex = options.LineColorMode == PreviewLineColorMode.SkinPerfect ? 1 : 0;
+    }
+
+    private void OnPreviewOptionChanged(object sender, RoutedEventArgs e)
+    {
+        var options = PreviewSurface.Options;
+        options.ShowLineNumbers = LineNumbersCheck.IsChecked == true;
+        options.ShowLineDirection = LineDirectionCheck.IsChecked == true;
+        options.ShowGameUi = GameUiCheck.IsChecked == true;
+        options.ShowHitEffects = HitEffectsCheck.IsChecked == true;
+    }
+
+    private void OnLineColorModeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (LineColorBox.SelectedIndex < 0)
+        {
+            return;
+        }
+
+        PreviewSurface.Options.LineColorMode = LineColorBox.SelectedIndex == 1
+            ? PreviewLineColorMode.SkinPerfect
+            : PreviewLineColorMode.SelectedAccent;
     }
 
     private void OnAudioFlyoutOpening(object sender, object e)

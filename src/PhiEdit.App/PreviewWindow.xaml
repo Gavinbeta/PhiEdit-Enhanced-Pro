@@ -3,7 +3,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="using:PhiEdit.App.Controls"
-        Title="实时预览 — 整份谱面">
+        Title="实时预览">
 
     <Grid Background="#FF0C0E13" RowDefinitions="Auto,*">
         <Border Grid.Row="0" Background="#FF171B23" BorderBrush="#FF303745" BorderThickness="0,0,0,1">
@@ -16,6 +16,27 @@
                             <ScrollViewer MaxHeight="420">
                                 <StackPanel x:Name="AudioPanel" Width="420" Padding="4" Spacing="8" />
                             </ScrollViewer>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
+                <Button x:Name="OptionsButton" Width="56" Content="显示">
+                    <Button.Flyout>
+                        <Flyout Opening="OnPreviewOptionsFlyoutOpening">
+                            <StackPanel Width="240" Spacing="8">
+                                <CheckBox x:Name="LineNumbersCheck" Content="显示线号" IsChecked="True"
+                                          Checked="OnPreviewOptionChanged" Unchecked="OnPreviewOptionChanged" />
+                                <CheckBox x:Name="LineDirectionCheck" Content="显示方向标记" IsChecked="True"
+                                          Checked="OnPreviewOptionChanged" Unchecked="OnPreviewOptionChanged" />
+                                <CheckBox x:Name="GameUiCheck" Content="显示游戏界面" IsChecked="True"
+                                          Checked="OnPreviewOptionChanged" Unchecked="OnPreviewOptionChanged" />
+                                <CheckBox x:Name="HitEffectsCheck" Content="显示打击特效" IsChecked="True"
+                                          Checked="OnPreviewOptionChanged" Unchecked="OnPreviewOptionChanged" />
+                                <ComboBox x:Name="LineColorBox" Header="判定线配色" SelectedIndex="0"
+                                          SelectionChanged="OnLineColorModeChanged">
+                                    <ComboBoxItem Content="当前线绿色" />
+                                    <ComboBoxItem Content="全部金色" />
+                                </ComboBox>
+                            </StackPanel>
                         </Flyout>
                     </Button.Flyout>
                 </Button>
@@ -37,8 +58,6 @@
                           Foreground="#FFD8E0EC" VerticalAlignment="Center" />
                 <TextBlock x:Name="AudioStatus" Text="音频未加载" FontSize="12" Foreground="#FF8FA0B8"
                            VerticalAlignment="Center" MinWidth="110" />
-                <TextBlock Text="背景音与音符音效分层播放；每条判定线可独立控制。"
-                           FontSize="12" Foreground="#FF8FA0B8" VerticalAlignment="Center" />
             </StackPanel>
         </Border>
 

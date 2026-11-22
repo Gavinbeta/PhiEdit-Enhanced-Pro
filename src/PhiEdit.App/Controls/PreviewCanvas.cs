@@ -435,7 +435,11 @@ public sealed class PreviewCanvas : UserControl
                     continue;
                 }
 
-                _hudTimes.Add(tempo.SecondsAt(note.StartBeat.Value, line.BpmFactor) + offset);
+                // 参考 preview.mjs：Hold 的完成时间是 EndBeat，其余音符是 StartBeat。
+                var completionBeat = note.Type == NoteType.Hold
+                    ? note.EndBeat.Value
+                    : note.StartBeat.Value;
+                _hudTimes.Add(tempo.SecondsAt(completionBeat, line.BpmFactor) + offset);
                 lastBeat = Math.Max(lastBeat, note.EndBeat.Value);
             }
         }

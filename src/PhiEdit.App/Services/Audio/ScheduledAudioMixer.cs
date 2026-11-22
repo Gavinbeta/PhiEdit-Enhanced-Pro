@@ -59,6 +59,8 @@ public sealed class PcmSampleProvider : ISampleProvider
 /// </summary>
 public sealed class ScheduledAudioMixer : ISampleProvider
 {
+    private const double ScheduleAheadSeconds = 0.25;
+
     private readonly MixingSampleProvider _mixer =
         new(WaveFormat.CreateIeeeFloatWaveFormat(PcmAudioBuffer.SampleRate, 2)) { ReadFully = true };
 
@@ -150,6 +152,9 @@ public sealed class ScheduledAudioMixer : ISampleProvider
 
         var frames = count / 2;
         var end = _position + (long)Math.Round(frames * _rate);
+        // 参考 hitsounds.mjs 的 0.1s/0.3s 前瞻调度：提前把命中音加入混音器，
+        // 主线程或音频回调偶发抖动时也不会错过密集音符。
+        var scheduleEnd = end + (long)Math.Round(ScheduleAheadSeconds * PcmAudioBuffer.SampleRate * _rate);
         var anySolo = false;
         foreach (var bus in _buses)
         {
@@ -160,7 +165,7 @@ public sealed class ScheduledAudioMixer : ISampleProvider
             }
         }
 
-        while (_nextHit < _hits.Length && _hits[_nextHit].TimeSamples < end)
+        while (_nextHit < _hits.Length && _hits[_nextHit].TimeSamples < scheduleEnd)
         {
             var hit = _hits[_nextHit++];
             if (hit.TimeSamples < _position || hit.SoundIndex < 0 || hit.SoundIndex >= _sounds.Length)

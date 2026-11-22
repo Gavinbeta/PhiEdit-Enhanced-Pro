@@ -12,7 +12,7 @@ namespace PhiEdit.App.Controls;
 
 /// <summary>
 /// 实时预览专用 ASCII 字体图集。使用 GDI+ 私有字体加载 TTF 并预渲染字形，
-/// Win2D 只负责贴图绘制，避免系统字体集合与 DirectWrite COM 私有字体兼容问题。
+/// Win2D 直接绘制字形，不经过中间渲染目标，避免缓存位图造成的模糊、残影与堆叠。
 /// 主界面不调用这个类。
 /// </summary>
 public sealed class PreviewFontAtlas
@@ -31,14 +31,6 @@ public sealed class PreviewFontAtlas
     private static byte[]? _goldPng;
     private static readonly float[] Advances = new float[CharCount];
     private static bool _advancesReady;
-
-    private readonly record struct TextKey(string Text, int Size, uint Color,
-        bool Center, bool Right, bool Middle, bool Bottom);
-
-    private readonly record struct CachedText(CanvasRenderTarget Bitmap, float OffsetX, float OffsetY);
-
-    private readonly Dictionary<TextKey, CachedText> _textCache = new();
-    private ICanvasResourceCreator? _textCreator;
 
     public bool IsReady => _white is not null && _green is not null && _gold is not null;
 
@@ -59,24 +51,12 @@ public sealed class PreviewFontAtlas
 
     public void Reset()
     {
-        ClearTextCache();
         _white?.Dispose();
         _green?.Dispose();
         _gold?.Dispose();
         _white = null;
         _green = null;
         _gold = null;
-    }
-
-    private void ClearTextCache()
-    {
-        foreach (var cached in _textCache.Values)
-        {
-            cached.Bitmap.Dispose();
-        }
-
-        _textCache.Clear();
-        _textCreator = null;
     }
 
     public float Measure(string text, float size)
@@ -114,43 +94,7 @@ public sealed class PreviewFontAtlas
             return;
         }
 
-        // 长文本（分数、曲名、难度、连击数）直接绘制，避免中间渲染目标造成模糊/堆叠；
-        // 只缓存线号等短文本，它们数量多且重复度高。
-        if (text.Length > 3)
-        {
-            DrawGlyphs(drawing, atlas, text, size, origin, center, right, middle, bottom);
-            return;
-        }
-
-        if (!ReferenceEquals(_textCreator, drawing))
-        {
-            ClearTextCache();
-            _textCreator = drawing;
-        }
-
-        var key = new TextKey(text, Math.Max(1, (int)Math.Round(size)), argb,
-            center, right, middle, bottom);
-        if (!_textCache.TryGetValue(key, out var cached))
-        {
-            if (_textCache.Count >= 512)
-            {
-                foreach (var old in _textCache.Values)
-                {
-                    old.Bitmap.Dispose();
-                }
-
-                _textCache.Clear();
-            }
-
-            cached = RenderCached(drawing, atlas, text, size, center, right, middle, bottom);
-            _textCache[key] = cached;
-        }
-
-        var bitmap = cached.Bitmap;
-        drawing.DrawImage(bitmap,
-            new Rect(origin.X + cached.OffsetX, origin.Y + cached.OffsetY,
-                bitmap.Size.Width, bitmap.Size.Height),
-            new Rect(0, 0, bitmap.Size.Width, bitmap.Size.Height), 1);
+        DrawGlyphs(drawing, atlas, text, size, origin, center, right, middle, bottom);
     }
 
     private void DrawGlyphs(CanvasDrawingSession drawing, CanvasBitmap atlas, string text, float size,
@@ -162,6 +106,7 @@ public sealed class PreviewFontAtlas
         var width = Measure(text, size);
         var penX = origin.X - (center ? width / 2 : right ? width : 0);
         var y = origin.Y - (middle ? cellHeight / 2 : bottom ? cellHeight : 0);
+
         for (var index = 0; index < text.Length; index++)
         {
             var glyphIndex = text[index] - FirstChar;
@@ -176,29 +121,6 @@ public sealed class PreviewFontAtlas
                 new Rect(glyphIndex * CellWidth, 0, CellWidth, CellHeight), 1);
             penX += (float)advance;
         }
-    }
-
-    private CachedText RenderCached(ICanvasResourceCreator creator, CanvasBitmap atlas, string text,
-        float size, bool center, bool right, bool middle, bool bottom)
-    {
-        const int padding = 4;
-        var scale = size / FontSize;
-        var cellWidth = CellWidth * scale;
-        var cellHeight = CellHeight * scale;
-        var width = Measure(text, size);
-        var dpiCreator = (ICanvasResourceCreatorWithDpi)creator;
-        var target = new CanvasRenderTarget(dpiCreator,
-            new Size(width + padding * 2, cellHeight + padding * 2));
-
-        using (var session = target.CreateDrawingSession())
-        {
-            DrawGlyphs(session, atlas, text, size, new Vector2(padding, padding),
-                false, false, false, false);
-        }
-
-        var offsetX = center ? -width / 2 - padding : right ? -width - padding : -padding;
-        var offsetY = middle ? -cellHeight / 2 - padding : bottom ? -cellHeight - padding : -padding;
-        return new CachedText(target, (float)offsetX, (float)offsetY);
     }
 
     private static async Task<CanvasBitmap> Load(ICanvasResourceCreator creator, byte[] png)

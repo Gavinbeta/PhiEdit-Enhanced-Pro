@@ -1,5 +1,4 @@
 using Microsoft.Graphics.Canvas;
-using Microsoft.Graphics.Canvas.Effects;
 using Microsoft.Graphics.Canvas.Text;
 using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.UI.Xaml;
@@ -31,6 +30,18 @@ public sealed class PreviewCanvas : UserControl
     private const double HitFrameSeconds = 0.015;
     private const int HitFrameCount = 31;
 
+    private static readonly double[] WhiteLineColor = { 255, 255, 255 };
+    private static readonly double[] GreenLineColor = { 0, 200, 0 };
+    private static readonly double[] GoldLineColor = { 241, 216, 148 };
+    private static readonly double[] GoldHitColor = { 255, 236, 160 };
+    private static readonly double[] WhiteHitColor = { 255, 255, 255 };
+    private static readonly double[] FlickFallbackColor = { 245, 150, 172 };
+    private static readonly double[] DragFallbackColor = { 241, 206, 118 };
+    private static readonly double[] TapFallbackColor = { 138, 203, 255 };
+
+    private readonly double[] _perfectColorRgb = new double[3];
+    private uint _cachedPerfectArgb = uint.MaxValue;
+
     private readonly CanvasControl _canvas = new()
     {
         HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -43,7 +54,9 @@ public sealed class PreviewCanvas : UserControl
     private readonly TintedBitmapCache _tintCache = new();
     private readonly PreviewFontAtlas _fontAtlas = new();
     private readonly Dictionary<(string Text, int Size), CanvasTextLayout> _textLayouts = new();
-    private readonly Dictionary<(string Text, int Size, bool Bold), CanvasTextLayout> _guideLayouts = new();
+    private readonly Dictionary<int, IReadOnlyList<NoteEntry>> _visibleCache = new();
+    private readonly Dictionary<long, Func<int, LineState?>> _hitSamples = new();
+    private PreviewRenderOptions _options = new();
     private readonly Dictionary<string, CanvasBitmap> _assetTextures = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _loadingTextures = new(StringComparer.OrdinalIgnoreCase);
     private EditorSession? _session;
@@ -55,14 +68,12 @@ public sealed class PreviewCanvas : UserControl
     private TempoMap? _tempoMap;
     private string? _tempoSignature;
     private CanvasBitmap? _background;
-    private GaussianBlurEffect? _backgroundEffect;
     private string? _backgroundKey;
     private ChartDocument? _backgroundDocument;
     private ChartAssetStore? _backgroundAssets;
     private bool _backgroundLoading;
     private bool _backgroundResolved;
     private long _backgroundGeneration;
-    private double _backgroundBrightness = 1;
     private long _packGeneration;
     private long _assetGeneration;
     private ChartDocument? _hudDocument;
@@ -72,25 +83,28 @@ public sealed class PreviewCanvas : UserControl
 
     public PreviewCanvas()
     {
+        _options.PropertyChanged += OnOptionsChanged;
         Content = _canvas;
         _canvas.Draw += OnDraw;
         _canvas.CreateResources += (sender, _) => EnsureTexturesLoaded(sender);
         _canvas.SizeChanged += (_, _) => Invalidate();
     }
 
-    /// <summary>背景亮度，0 为纯黑，1 为原图亮度；对应参考 preview.backgroundAlpha。</summary>
-    public double BackgroundBrightness
+    /// <summary>可配置渲染选项；主编辑区嵌入时可复用同一套配置。</summary>
+    public PreviewRenderOptions Options
     {
-        get => _backgroundBrightness;
+        get => _options;
         set
         {
-            var clamped = Math.Clamp(value, 0, 1);
-            if (Math.Abs(_backgroundBrightness - clamped) < 1e-6)
+            var next = value ?? new PreviewRenderOptions();
+            if (ReferenceEquals(_options, next))
             {
                 return;
             }
 
-            _backgroundBrightness = clamped;
+            _options.PropertyChanged -= OnOptionsChanged;
+            _options = next;
+            _options.PropertyChanged += OnOptionsChanged;
             Invalidate();
         }
     }
@@ -138,6 +152,18 @@ public sealed class PreviewCanvas : UserControl
         }
     }
 
+    private void OnOptionsChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(PreviewRenderOptions.BackgroundBrightness))
+        {
+            Invalidate();
+            return;
+        }
+
+        // 显示开关与配色方案同样只需重绘；HUD 缓存不依赖这些选项。
+        Invalidate();
+    }
+
     private void InvalidateGenerations()
     {
         _backgroundGeneration++;
@@ -153,9 +179,7 @@ public sealed class PreviewCanvas : UserControl
     /// <summary>窗口关闭时释放该窗口设备上的位图与效果。</summary>
     public void ReleaseResources()
     {
-        _backgroundEffect?.Dispose();
         _background?.Dispose();
-        _backgroundEffect = null;
         _background = null;
         _textures.Reset();
         _packRenderer.Reset();
@@ -176,6 +200,7 @@ public sealed class PreviewCanvas : UserControl
     private void OnSessionChanged(object? sender, EventArgs e)
     {
         _scene.MarkDirty();
+        _hudDocument = null;
         _backgroundDocument = null;
         _backgroundResolved = false;
         _backgroundGeneration++;
@@ -296,34 +321,27 @@ public sealed class PreviewCanvas : UserControl
     private async Task LoadBackgroundAsync(ICanvasResourceCreator creator, byte[] bytes, string name, long token)
     {
         CanvasBitmap? loaded = null;
-        GaussianBlurEffect? effect = null;
         try
         {
             using var stream = new MemoryStream(bytes, writable: false);
             using var random = stream.AsRandomAccessStream();
             loaded = await CanvasBitmap.LoadAsync(creator, random);
-            effect = new GaussianBlurEffect { Source = loaded, BlurAmount = 10.5f };
             if (token != _backgroundGeneration)
             {
-                effect.Dispose();
                 loaded.Dispose();
                 return;
             }
 
             _background?.Dispose();
-            _backgroundEffect?.Dispose();
             _background = loaded;
-            _backgroundEffect = effect;
             Invalidate();
         }
         catch
         {
-            effect?.Dispose();
             loaded?.Dispose();
             if (token == _backgroundGeneration)
             {
                 _background = null;
-                _backgroundEffect = null;
                 _backgroundKey = null;
             }
         }
@@ -433,9 +451,9 @@ public sealed class PreviewCanvas : UserControl
     /// 这里只按用户截图布局，不使用皮肤差异。
     /// </summary>
     private void DrawGameUi(CanvasDrawingSession drawing, float scale, double seconds,
-        PreviewViewport viewport)
+        PreviewViewport viewport, TempoMap tempo)
     {
-        PrepareHud(_session!.Document, GetTempo(_session.Document));
+        PrepareHud(_session!.Document, tempo);
         var white = Windows.UI.Color.FromArgb(255, 255, 255, 255);
         var total = _hudTimes.Count;
         var combo = LowerBound(_hudTimes, seconds);
@@ -573,36 +591,48 @@ public sealed class PreviewCanvas : UserControl
         var tempo = GetTempo(session.Document);
         _scene.Compile(session.Document, tempo);
         var seconds = _clock?.CurrentSeconds ?? tempo.SecondsAt(session.Viewport.Position);
-        var states = _scene.Sample(seconds, PreviewViewport.PositionScale());
         var scale = (float)viewport.Scale;
         var originX = (float)(viewport.Left + viewport.Width / 2);
         var originY = (float)(viewport.Top + viewport.Height / 2);
-
-        var visibleCache = new Dictionary<int, IReadOnlyList<NoteEntry>>();
         var aspectRatio = viewport.Height > 0 ? viewport.Width / viewport.Height : 1.5;
         var positionScale = PreviewViewport.PositionScale(aspectRatio);
+        var states = _scene.Sample(seconds, positionScale);
         var visibleDivisor = Math.Max(1, viewport.Width / Math.Max(1, scale) / StageWidth);
+
+        _visibleCache.Clear();
         for (var index = 0; index < states.Count; index++)
         {
-            var lineDistance = Math.Sqrt(states[index].X * states[index].X + states[index].Y * states[index].Y);
+            var dx = states[index].X;
+            var dy = states[index].Y;
+            var lineDistance = Math.Sqrt(dx * dx + dy * dy);
             var radius = (1200 * visibleDivisor + lineDistance) / Math.Max(0.01, Math.Abs(positionScale.Y));
-            visibleCache[index] = _scene.Lines[index].VisibleNotes(seconds, states[index], radius);
+            _visibleCache[index] = _scene.Lines[index].VisibleNotes(seconds, states[index], radius);
         }
 
         using (drawing.CreateLayer(1, new Rect(viewport.Left, viewport.Top, viewport.Width, viewport.Height)))
         {
             var selectedLine = _session?.CurrentLineIndex ?? -1;
-            DrawPass(drawing, sender, PassKind.Line, states, originX, originY, scale, viewport, selectedLine, seconds, visibleCache);
-            DrawPass(drawing, sender, PassKind.Hold, states, originX, originY, scale, viewport, selectedLine, seconds, visibleCache);
-            DrawPass(drawing, sender, PassKind.Note, states, originX, originY, scale, viewport, selectedLine, seconds, visibleCache);
-            DrawHits(drawing, states, originX, originY, scale, seconds, viewport);
-            DrawGameUi(drawing, scale, seconds, viewport);
-            DrawGuides(drawing, sender, states, scale, selectedLine, viewport);
+            DrawPass(drawing, sender, PassKind.Line, states, originX, originY, scale, viewport,
+                selectedLine, seconds, positionScale);
+            DrawPass(drawing, sender, PassKind.Hold, states, originX, originY, scale, viewport,
+                selectedLine, seconds, positionScale);
+            DrawPass(drawing, sender, PassKind.Note, states, originX, originY, scale, viewport,
+                selectedLine, seconds, positionScale);
+            if (_options.ShowHitEffects)
+            {
+                DrawHits(drawing, states, originX, originY, scale, seconds, viewport, positionScale);
+            }
+            if (_options.ShowGameUi)
+            {
+                DrawGameUi(drawing, scale, seconds, viewport, tempo);
+            }
+
+            if (_options.ShowLineNumbers || _options.ShowLineDirection)
+            {
+                DrawGuides(drawing, states, scale, selectedLine, viewport);
+            }
         }
 
-        var format = CanvasExtensions.TextFormat(12);
-        drawing.DrawText("实时预览 · 整份谱面", new Vector2(10, 8),
-            Windows.UI.Color.FromArgb(190, 210, 220, 235), format);
     }
 
     private void DrawBackground(CanvasDrawingSession drawing, float width, float height, double scale)
@@ -617,7 +647,7 @@ public sealed class PreviewCanvas : UserControl
         var drawHeight = _background.Size.Height * factor;
         var destination = new Rect((width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
         var source = new Rect(0, 0, _background.Size.Width, _background.Size.Height);
-        var opacity = (float)Math.Clamp(_backgroundBrightness, 0, 1);
+        var opacity = (float)Math.Clamp(_options.BackgroundBrightness, 0, 1);
         if (opacity <= 0)
         {
             return;
@@ -631,11 +661,8 @@ public sealed class PreviewCanvas : UserControl
 
     private void DrawPass(CanvasDrawingSession drawing, ICanvasResourceCreator creator, PassKind pass,
         IReadOnlyList<LineState> states, float originX, float originY, float scale, PreviewViewport viewport,
-        int selectedLine, double seconds, Dictionary<int, IReadOnlyList<NoteEntry>> visibleCache)
+        int selectedLine, double seconds, (double X, double Y) positionScale)
     {
-        var aspectRatio = viewport.Height > 0 ? viewport.Width / viewport.Height : 1.5;
-        var positionScale = PreviewViewport.PositionScale(aspectRatio);
-        var visibleDivisor = Math.Max(1, viewport.Width / Math.Max(1, scale) / StageWidth);
         foreach (var index in _scene.Order)
         {
             if (index < 0 || index >= states.Count)
@@ -654,7 +681,7 @@ public sealed class PreviewCanvas : UserControl
             }
 
             if (pass != PassKind.Line &&
-                (!visibleCache.TryGetValue(index, out var cached) || cached.Count == 0))
+                (!_visibleCache.TryGetValue(index, out var cached) || cached.Count == 0))
             {
                 continue;
             }
@@ -682,15 +709,9 @@ public sealed class PreviewCanvas : UserControl
             }
             else
             {
-                if (!visibleCache.TryGetValue(index, out var entries))
+                if (!_visibleCache.TryGetValue(index, out var entries) || entries.Count == 0)
                 {
-                    // 参考 preview.mjs drawScene：远处判定线的音符可以被画布中心之外很长的距离，
-                    // 固定 1600 会先把它从 VisibleNotes 过滤掉。按线中心到舞台中心的距离扩大半径。
-                    var lineDistance = Math.Sqrt(state.X * state.X + state.Y * state.Y);
-                    var radius = (1600 * visibleDivisor + lineDistance) /
-                                 Math.Max(0.01, Math.Abs(positionScale.Y));
-                    entries = runtime.VisibleNotes(seconds, state, radius);
-                    visibleCache[index] = entries;
+                    continue;
                 }
 
                 foreach (var entry in entries)
@@ -775,21 +796,31 @@ public sealed class PreviewCanvas : UserControl
         var isDefault = string.IsNullOrEmpty(line.Texture) || line.Texture == "line.png";
         var alpha = (float)Math.Clamp(state.Alpha / 255, 0, 1);
         var pack = _packRenderer.IsReady ? _packRenderer.Skin : null;
-        double[] lineColor = state.Color;
-
-        // 参考 preview.mjs drawScene：正在编辑的判定线染成绿色，优先于资源包 perfectColor。
-        if (selected)
+        var usePackColor = pack is not null && isDefault && !line.AttachUI &&
+                           !runtime.HasTextEvents && !runtime.HasColorEvents;
+        double[] lineColor;
+        if (_options.LineColorMode == PreviewLineColorMode.SkinPerfect)
         {
-            lineColor = new double[] { 0, 200, 0 };
+            if (usePackColor)
+            {
+                lineColor = PerfectColor(pack, out var packAlpha);
+                alpha *= packAlpha;
+            }
+            else
+            {
+                lineColor = GoldLineColor;
+            }
+        }
+        else if (selected)
+        {
+            lineColor = GreenLineColor;
         }
         else
         {
-            // 实时预览中未编辑的判定线统一纯白；资源包只保留其透明度信息。
-            lineColor = new double[] { 255, 255, 255 };
-            if (pack is not null && isDefault && !line.AttachUI &&
-                !runtime.HasTextEvents && !runtime.HasColorEvents)
+            lineColor = WhiteLineColor;
+            if (usePackColor)
             {
-                alpha *= (float)((pack.Info.ColorPerfect >> 24) & 0xFF) / 255f;
+                alpha *= (float)((pack!.Info.ColorPerfect >> 24) & 0xFF) / 255f;
             }
         }
 
@@ -1034,22 +1065,31 @@ public sealed class PreviewCanvas : UserControl
     }
 
     private void DrawHits(CanvasDrawingSession drawing, IReadOnlyList<LineState> states,
-        float originX, float originY, float scale, double seconds, PreviewViewport viewport)
+        float originX, float originY, float scale, double seconds, PreviewViewport viewport,
+        (double X, double Y) positionScale)
     {
-        var defaultTint = new[] { 255.0, 236.0, 160.0 };
         var pack = _packRenderer.IsReady ? _packRenderer.Skin : null;
-        var aspectRatio = viewport.Height > 0 ? viewport.Width / viewport.Height : 1.5;
-        var positionScale = PreviewViewport.PositionScale(aspectRatio);
         const double lifetime = 2.0 / 3.0;
-        var samples = new Dictionary<long, Func<int, LineState?>>();
+        _hitSamples.Clear();
+        double[] packRgb = GoldHitColor;
+        if (pack is not null)
+        {
+            var perfect = pack.Info.ColorPerfect;
+            packRgb = new[]
+            {
+                (double)((perfect >> 16) & 0xFF),
+                (double)((perfect >> 8) & 0xFF),
+                (double)(perfect & 0xFF),
+            };
+        }
 
         Func<int, LineState?> SampleAt(double time)
         {
             var key = (long)Math.Round(time * 1_000_000);
-            if (!samples.TryGetValue(key, out var result))
+            if (!_hitSamples.TryGetValue(key, out var result))
             {
                 result = _scene.Sampler(time, positionScale);
-                samples[key] = result;
+                _hitSamples[key] = result;
             }
 
             return result;
@@ -1096,13 +1136,13 @@ public sealed class PreviewCanvas : UserControl
                 var x = originX + (float)(worldX * scale);
                 var y = originY + (float)(worldY * scale);
                 var size = (float)(LogicalNoteSize * 1.4 * scale);
-                var tint = entry.Note.TintHitEffects ?? defaultTint;
+                var tint = entry.Note.TintHitEffects ?? GoldHitColor;
                 var hitBitmap = _packRenderer["hit_fx.png"];
                 if (pack is not null && hitBitmap is not null)
                 {
-                    var perfect = pack.Info.ColorPerfect;
-                    var perfectRgb = new[] { (double)((perfect >> 16) & 0xFF), (double)((perfect >> 8) & 0xFF), (double)(perfect & 0xFF) };
-                    tint = pack.Info.HitFxTinted ? entry.Note.TintHitEffects ?? perfectRgb : new double[] { 255, 255, 255 };
+                    tint = pack.Info.HitFxTinted
+                        ? entry.Note.TintHitEffects ?? packRgb
+                        : WhiteHitColor;
                 }
 
                 if (age < (pack?.Info.HitFxDuration ?? HitFrameSeconds * HitFrameCount))
@@ -1171,27 +1211,11 @@ public sealed class PreviewCanvas : UserControl
         }
     }
 
-    private sealed class GuideGroup
-    {
-        public GuideGroup(float x, float y, float rotation, int index)
-        {
-            X = x;
-            Y = y;
-            Rotation = rotation;
-            Indices.Add(index);
-        }
-
-        public float X { get; }
-        public float Y { get; }
-        public float Rotation { get; }
-        public List<int> Indices { get; } = new();
-    }
-
     /// <summary>
     /// 参考 preview.mjs drawGuides：中心线号 + 当前线的菱形方向箭头。
     /// 每条线只显示一个编号；当前线为加粗大号绿色，其余为白色；辅助层不受判定线透明度影响。
     /// </summary>
-    private void DrawGuides(CanvasDrawingSession drawing, ICanvasResourceCreator creator,
+    private void DrawGuides(CanvasDrawingSession drawing,
         IReadOnlyList<LineState> states, float scale, int selectedLine, PreviewViewport viewport)
     {
         var originX = viewport.Left + viewport.Width / 2;
@@ -1233,7 +1257,7 @@ public sealed class PreviewCanvas : UserControl
             var baseTransform = Matrix3x2.CreateRotation((float)(state.Rotation * Math.PI / 180)) *
                                 Matrix3x2.CreateTranslation(x, y) * oldTransform;
 
-            if (selected)
+            if (selected && _options.ShowLineDirection)
             {
                 drawing.Transform = Matrix3x2.CreateRotation((float)Math.PI) * baseTransform;
                 if (arrow is not null)
@@ -1250,36 +1274,17 @@ public sealed class PreviewCanvas : UserControl
                 }
             }
 
-            drawing.Transform = baseTransform;
-            var textY = (float)((selected ? 8 : 4) * scale);
-            _fontAtlas.Draw(drawing, label, new Vector2(0, textY), fontSize,
-                selected ? selectedColor : normalColor, center: true);
+            if (_options.ShowLineNumbers)
+            {
+                drawing.Transform = baseTransform;
+                var textY = (float)((selected ? 8 : 4) * scale);
+                _fontAtlas.Draw(drawing, label, new Vector2(0, textY), fontSize,
+                    selected ? selectedColor : normalColor, center: true);
+            }
+
             drawing.Transform = oldTransform;
         }
         }
-    }
-
-    private string FormatLineNumbers(IEnumerable<int> indices)
-    {
-        var sorted = indices.OrderBy(index => index).ToArray();
-        var parts = new List<string>();
-        for (var index = 0; index < sorted.Length; index++)
-        {
-            var first = sorted[index];
-            var last = first;
-            while (index + 1 < sorted.Length && sorted[index + 1] == last + 1 &&
-                   _scene.Lines[first].Line.Father < 0 && _scene.Lines[sorted[index + 1]].Line.Father < 0)
-            {
-                last = sorted[++index];
-            }
-
-            var father = _scene.Lines[first].Line.Father;
-            parts.Add(last == first
-                ? father >= 0 ? $"{first}({father})" : first.ToString(CultureInfo.InvariantCulture)
-                : $"{first}–{last}");
-        }
-
-        return string.Join(", ", parts);
     }
 
     private static bool InViewport(Rect rect, PreviewViewport viewport) =>
@@ -1288,9 +1293,9 @@ public sealed class PreviewCanvas : UserControl
 
     private static double[] DefaultNoteColor(NoteType type) => type switch
     {
-        NoteType.Flick => new[] { 245.0, 150.0, 172.0 },
-        NoteType.Drag => new[] { 241.0, 206.0, 118.0 },
-        _ => new[] { 138.0, 203.0, 255.0 },
+        NoteType.Flick => FlickFallbackColor,
+        NoteType.Drag => DragFallbackColor,
+        _ => TapFallbackColor,
     };
 
     private void DrawTinted(CanvasDrawingSession drawing, CanvasBitmap bitmap, Rect destination, Rect source,
@@ -1311,6 +1316,28 @@ public sealed class PreviewCanvas : UserControl
         var tinted = _tintCache.Get(_creator, bitmap, source, color);
         drawing.DrawImage(tinted, destination,
             new Rect(0, 0, tinted.Size.Width, tinted.Size.Height), opacity);
+    }
+
+    /// <summary>资源包 perfectColor 的 RGB 与 alpha，按 ARGB 值缓存，避免每帧每线分配数组。</summary>
+    private double[] PerfectColor(NoteSkin? pack, out float alphaScale)
+    {
+        if (pack is null)
+        {
+            alphaScale = 1;
+            return GoldLineColor;
+        }
+
+        var argb = pack.Info.ColorPerfect;
+        if (_cachedPerfectArgb != argb)
+        {
+            _perfectColorRgb[0] = (argb >> 16) & 0xFF;
+            _perfectColorRgb[1] = (argb >> 8) & 0xFF;
+            _perfectColorRgb[2] = argb & 0xFF;
+            _cachedPerfectArgb = argb;
+        }
+
+        alphaScale = ((argb >> 24) & 0xFF) / 255f;
+        return _perfectColorRgb;
     }
 
     private static Windows.UI.Color Rgb(IReadOnlyList<double> color) =>

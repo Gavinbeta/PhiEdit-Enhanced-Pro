@@ -41,6 +41,7 @@ public sealed class PreviewCanvas : UserControl
     private readonly RpeTextureRenderer _textures = new();
     private readonly NoteSkinRenderer _packRenderer = new();
     private readonly TintedBitmapCache _tintCache = new();
+    private readonly PreviewFontAtlas _fontAtlas = new();
     private readonly Dictionary<(string Text, int Size), CanvasTextLayout> _textLayouts = new();
     private readonly Dictionary<(string Text, int Size, bool Bold), CanvasTextLayout> _guideLayouts = new();
     private readonly Dictionary<string, CanvasBitmap> _assetTextures = new(StringComparer.OrdinalIgnoreCase);
@@ -71,7 +72,6 @@ public sealed class PreviewCanvas : UserControl
 
     public PreviewCanvas()
     {
-        CanvasExtensions.EnsurePreviewFont();
         Content = _canvas;
         _canvas.Draw += OnDraw;
         _canvas.CreateResources += (sender, _) => EnsureTexturesLoaded(sender);
@@ -160,6 +160,7 @@ public sealed class PreviewCanvas : UserControl
         _textures.Reset();
         _packRenderer.Reset();
         _tintCache.Reset();
+        _fontAtlas.Reset();
         foreach (var layout in _textLayouts.Values)
         {
             layout.Dispose();
@@ -259,6 +260,7 @@ public sealed class PreviewCanvas : UserControl
         try
         {
             await _textures.LoadAsync(creator);
+            await _fontAtlas.LoadAsync(creator);
             Invalidate();
         }
         finally
@@ -476,7 +478,7 @@ public sealed class PreviewCanvas : UserControl
 
     private void DrawUiText(CanvasDrawingSession drawing, string text, float x, float y,
         float size, Windows.UI.Color color, bool center = false, bool right = false, bool middle = false) =>
-        PreviewGlyphText.Draw(drawing, text, new Vector2(x, y), size, color, center, right, middle: middle);
+        _fontAtlas.Draw(drawing, text, new Vector2(x, y), size, color, center, right, middle: middle);
 
     private static int LowerBound(IReadOnlyList<double> values, double value)
     {
@@ -825,12 +827,12 @@ public sealed class PreviewCanvas : UserControl
 
         var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
         var size = Math.Max(1, (int)Math.Round(52 * scale));
-        if (PreviewGlyphText.IsAscii(normalized) && !normalized.Contains('\n'))
+        if (normalized.All(character => character <= 0x7F) && !normalized.Contains('\n'))
         {
-            var glyphWidth = PreviewGlyphText.Measure(drawing, normalized, size);
+            var glyphWidth = _fontAtlas.Measure(normalized, size);
             var glyphLeft = (float)(centerX - glyphWidth * line.AnchorX);
             var glyphTop = (float)(centerY - size * (1 - line.AnchorY));
-            PreviewGlyphText.Draw(drawing, normalized,
+            _fontAtlas.Draw(drawing, normalized,
                 new Vector2(glyphLeft, glyphTop), size, WithAlpha(color, alpha));
             return;
         }
@@ -1228,8 +1230,8 @@ public sealed class PreviewCanvas : UserControl
 
             drawing.Transform = baseTransform;
             var textY = (float)((selected ? 8 : 4) * scale);
-            PreviewGlyphText.Draw(drawing, label, new Vector2(0, textY), fontSize,
-                selected ? selectedColor : normalColor, center: true, bold: selected);
+            _fontAtlas.Draw(drawing, label, new Vector2(0, textY), fontSize,
+                selected ? selectedColor : normalColor, center: true);
             drawing.Transform = oldTransform;
         }
         }

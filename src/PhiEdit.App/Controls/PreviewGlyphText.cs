@@ -114,6 +114,14 @@ public sealed class PreviewFontAtlas
             return;
         }
 
+        // 长文本（分数、曲名、难度、连击数）直接绘制，避免中间渲染目标造成模糊/堆叠；
+        // 只缓存线号等短文本，它们数量多且重复度高。
+        if (text.Length > 3)
+        {
+            DrawGlyphs(drawing, atlas, text, size, origin, center, right, middle, bottom);
+            return;
+        }
+
         if (!ReferenceEquals(_textCreator, drawing))
         {
             ClearTextCache();
@@ -145,6 +153,31 @@ public sealed class PreviewFontAtlas
             new Rect(0, 0, bitmap.Size.Width, bitmap.Size.Height), 1);
     }
 
+    private void DrawGlyphs(CanvasDrawingSession drawing, CanvasBitmap atlas, string text, float size,
+        Vector2 origin, bool center, bool right, bool middle, bool bottom)
+    {
+        var scale = size / FontSize;
+        var cellWidth = CellWidth * scale;
+        var cellHeight = CellHeight * scale;
+        var width = Measure(text, size);
+        var penX = origin.X - (center ? width / 2 : right ? width : 0);
+        var y = origin.Y - (middle ? cellHeight / 2 : bottom ? cellHeight : 0);
+        for (var index = 0; index < text.Length; index++)
+        {
+            var glyphIndex = text[index] - FirstChar;
+            if (glyphIndex < 0 || glyphIndex >= CharCount)
+            {
+                continue;
+            }
+
+            var advance = (_advancesReady ? Advances[glyphIndex] : CellWidth) * scale;
+            drawing.DrawImage(atlas,
+                new Rect(penX + (advance - cellWidth) / 2, y, cellWidth, cellHeight),
+                new Rect(glyphIndex * CellWidth, 0, CellWidth, CellHeight), 1);
+            penX += (float)advance;
+        }
+    }
+
     private CachedText RenderCached(ICanvasResourceCreator creator, CanvasBitmap atlas, string text,
         float size, bool center, bool right, bool middle, bool bottom)
     {
@@ -153,28 +186,14 @@ public sealed class PreviewFontAtlas
         var cellWidth = CellWidth * scale;
         var cellHeight = CellHeight * scale;
         var width = Measure(text, size);
-        var pixelWidth = Math.Max(1, (int)Math.Ceiling(width + padding * 2));
-        var pixelHeight = Math.Max(1, (int)Math.Ceiling(cellHeight + padding * 2));
-        var target = new CanvasRenderTarget(creator, pixelWidth, pixelHeight, 96f);
+        var dpiCreator = (ICanvasResourceCreatorWithDpi)creator;
+        var target = new CanvasRenderTarget(dpiCreator,
+            new Size(width + padding * 2, cellHeight + padding * 2));
 
         using (var session = target.CreateDrawingSession())
         {
-            var penX = (float)padding;
-            var glyphY = (float)padding;
-            for (var index = 0; index < text.Length; index++)
-            {
-                var glyphIndex = text[index] - FirstChar;
-                if (glyphIndex < 0 || glyphIndex >= CharCount)
-                {
-                    continue;
-                }
-
-                var advance = (_advancesReady ? Advances[glyphIndex] : CellWidth) * scale;
-                session.DrawImage(atlas,
-                    new Rect(penX + (advance - cellWidth) / 2, glyphY, cellWidth, cellHeight),
-                    new Rect(glyphIndex * CellWidth, 0, CellWidth, CellHeight), 1);
-                penX += (float)advance;
-            }
+            DrawGlyphs(session, atlas, text, size, new Vector2(padding, padding),
+                false, false, false, false);
         }
 
         var offsetX = center ? -width / 2 - padding : right ? -width - padding : -padding;

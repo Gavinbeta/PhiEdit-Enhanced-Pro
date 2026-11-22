@@ -457,7 +457,7 @@ public sealed class PreviewCanvas : UserControl
 
         var progress = Math.Clamp((seconds + _session.Document.OffsetMilliseconds / 1000.0) /
             Math.Max(0.001, _hudDuration), 0, 1);
-        drawing.FillRectangle(new Rect(X(0), Y(446.04) - 4 * scale,
+        drawing.FillRectangle(new Rect(viewport.Left, viewport.Top,
             viewport.Width * progress, 8 * scale), white);
 
         if (combo >= 3)

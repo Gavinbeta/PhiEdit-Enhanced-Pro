@@ -443,42 +443,60 @@ public sealed class PreviewCanvas : UserControl
 
         var originX = viewport.Left + viewport.Width / 2;
         var originY = viewport.Top + viewport.Height / 2;
-        float X(double logical) => (float)(originX + logical * scale);
-        float Y(double logical) => (float)(originY - logical * scale);
+        var logicalWidth = viewport.Width / Math.Max(0.001, scale);
+        var logicalHeight = viewport.Height / Math.Max(0.001, scale);
+
+        // 严格照 game-ui.mjs gameUiLayout：edgeX/edgeY 会把 HUD 推向画布边缘，
+        // 少算这一项就会让暂停、曲名、难度和顶部 HUD 被裁掉。
+        Vector2 Layout(double ratioX, double ratioY, int edgeX, int edgeY)
+        {
+            var x = ratioX * 1920 - 675 + edgeX * (logicalWidth - 1350) / 2;
+            var y = ratioY * 1080 - 486 + edgeY * (logicalHeight - 900) / 2;
+            return new Vector2((float)(originX + x * scale), (float)(originY - y * scale));
+        }
+
+        var pausePosition = Layout(0.021, 0.838, -1, 1);
 
         var pause = _textures["Pause.png"];
         if (pause is not null)
         {
             var size = 42 * scale;
             drawing.DrawImage(pause,
-                new Rect(X(-634.68), Y(419.04) - size, size, size),
+                new Rect(pausePosition.X, pausePosition.Y - size, size, size),
                 new Rect(0, 0, pause.Size.Width, pause.Size.Height), 1);
         }
 
         var progress = Math.Clamp((seconds + _session.Document.OffsetMilliseconds / 1000.0) /
             Math.Max(0.001, _hudDuration), 0, 1);
-        drawing.FillRectangle(new Rect(viewport.Left, viewport.Top,
+        var barPosition = Layout(0, 0.863, -1, 1);
+        drawing.FillRectangle(new Rect(barPosition.X, barPosition.Y - 4 * scale,
             viewport.Width * progress, 8 * scale), white);
 
         if (combo >= 3)
         {
+            var comboPosition = Layout(0.3516, 0.825, 0, 1);
+            var labelPosition = Layout(0.3516, 0.7833, 0, 1);
             DrawUiText(drawing, combo.ToString(CultureInfo.InvariantCulture),
-                X(0.072), Y(405), 67 * scale, white, center: true, middle: true);
+                comboPosition.X, comboPosition.Y, 67 * scale, white, center: true, middle: true);
             DrawUiText(drawing, "combo",
-                X(0.072), Y(360), 35 * scale, white, center: true, middle: true);
+                labelPosition.X, labelPosition.Y, 35 * scale, white, center: true, middle: true);
         }
 
+        var scorePosition = Layout(0.6855, 0.8458, 1, 1);
+        var namePosition = Layout(0.02, 0.05417, -1, -1);
+        var levelPosition = Layout(0.6855, 0.05417, 1, -1);
         DrawUiText(drawing, ((long)Math.Round(score)).ToString("D7", CultureInfo.InvariantCulture),
-            X(641.16), Y(427.46), 49 * scale, white, right: true);
+            scorePosition.X, scorePosition.Y, 49 * scale, white, right: true);
         DrawUiText(drawing, _session.Document.SongName,
-            X(-636.6), Y(-427.5), 35 * scale, white);
+            namePosition.X, namePosition.Y, 35 * scale, white, bottom: true);
         DrawUiText(drawing, _session.Document.Difficulty,
-            X(641.16), Y(-427.5), 33 * scale, white, right: true);
+            levelPosition.X, levelPosition.Y, 33 * scale, white, right: true, bottom: true);
     }
 
     private void DrawUiText(CanvasDrawingSession drawing, string text, float x, float y,
-        float size, Windows.UI.Color color, bool center = false, bool right = false, bool middle = false) =>
-        _fontAtlas.Draw(drawing, text, new Vector2(x, y), size, color, center, right, middle: middle);
+        float size, Windows.UI.Color color, bool center = false, bool right = false,
+        bool middle = false, bool bottom = false) =>
+        _fontAtlas.Draw(drawing, text, new Vector2(x, y), size, color, center, right, middle, bottom);
 
     private static int LowerBound(IReadOnlyList<double> values, double value)
     {

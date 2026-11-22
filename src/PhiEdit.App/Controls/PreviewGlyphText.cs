@@ -25,12 +25,22 @@ public sealed class PreviewFontAtlas
 
     private CanvasBitmap? _white;
     private CanvasBitmap? _green;
+    private CanvasBitmap? _gold;
     private static byte[]? _whitePng;
     private static byte[]? _greenPng;
+    private static byte[]? _goldPng;
     private static readonly float[] Advances = new float[CharCount];
     private static bool _advancesReady;
 
-    public bool IsReady => _white is not null && _green is not null;
+    private readonly record struct TextKey(string Text, int Size, uint Color,
+        bool Center, bool Right, bool Middle, bool Bottom);
+
+    private readonly record struct CachedText(CanvasRenderTarget Bitmap, float OffsetX, float OffsetY);
+
+    private readonly Dictionary<TextKey, CachedText> _textCache = new();
+    private ICanvasResourceCreator? _textCreator;
+
+    public bool IsReady => _white is not null && _green is not null && _gold is not null;
 
     public async Task LoadAsync(ICanvasResourceCreator creator)
     {
@@ -41,16 +51,32 @@ public sealed class PreviewFontAtlas
 
         _whitePng ??= BuildAtlas(SD.Color.White);
         _greenPng ??= BuildAtlas(SD.Color.FromArgb(255, 0, 200, 0));
+        _goldPng ??= BuildAtlas(SD.Color.FromArgb(255, 241, 216, 148));
         _white = await Load(creator, _whitePng);
         _green = await Load(creator, _greenPng);
+        _gold = await Load(creator, _goldPng);
     }
 
     public void Reset()
     {
+        ClearTextCache();
         _white?.Dispose();
         _green?.Dispose();
+        _gold?.Dispose();
         _white = null;
         _green = null;
+        _gold = null;
+    }
+
+    private void ClearTextCache()
+    {
+        foreach (var cached in _textCache.Values)
+        {
+            cached.Bitmap.Dispose();
+        }
+
+        _textCache.Clear();
+        _textCreator = null;
     }
 
     public float Measure(string text, float size)
@@ -77,35 +103,83 @@ public sealed class PreviewFontAtlas
             return;
         }
 
-        var bitmap = color.G == 200 && color.R == 0 && color.B == 0 ? _green : _white;
-        if (bitmap is null)
+        var argb = (uint)((color.A << 24) | (color.R << 16) | (color.G << 8) | color.B);
+        var atlas = argb == 0xFFFFFFFF ? _white
+            : argb == 0xFF00C800 ? _green
+            : argb == 0xFFF1D894 ? _gold
+            : null;
+        if (atlas is null)
         {
             drawing.DrawText(text, origin, color, CanvasExtensions.TextFormat(size));
             return;
         }
 
+        if (!ReferenceEquals(_textCreator, drawing))
+        {
+            ClearTextCache();
+            _textCreator = drawing;
+        }
+
+        var key = new TextKey(text, Math.Max(1, (int)Math.Round(size)), argb,
+            center, right, middle, bottom);
+        if (!_textCache.TryGetValue(key, out var cached))
+        {
+            if (_textCache.Count >= 512)
+            {
+                foreach (var old in _textCache.Values)
+                {
+                    old.Bitmap.Dispose();
+                }
+
+                _textCache.Clear();
+            }
+
+            cached = RenderCached(drawing, atlas, text, size, center, right, middle, bottom);
+            _textCache[key] = cached;
+        }
+
+        var bitmap = cached.Bitmap;
+        drawing.DrawImage(bitmap,
+            new Rect(origin.X + cached.OffsetX, origin.Y + cached.OffsetY,
+                bitmap.Size.Width, bitmap.Size.Height),
+            new Rect(0, 0, bitmap.Size.Width, bitmap.Size.Height), 1);
+    }
+
+    private CachedText RenderCached(ICanvasResourceCreator creator, CanvasBitmap atlas, string text,
+        float size, bool center, bool right, bool middle, bool bottom)
+    {
+        const int padding = 4;
         var scale = size / FontSize;
         var cellWidth = CellWidth * scale;
         var cellHeight = CellHeight * scale;
         var width = Measure(text, size);
-        var penX = origin.X - (center ? width / 2 : right ? width : 0);
-        var y = origin.Y - (middle ? cellHeight / 2 : bottom ? cellHeight : 0);
-        for (var index = 0; index < text.Length; index++)
-        {
-            var code = text[index];
-            var glyphIndex = code - FirstChar;
-            if (glyphIndex < 0 || glyphIndex >= CharCount)
-            {
-                continue;
-            }
+        var pixelWidth = Math.Max(1, (int)Math.Ceiling(width + padding * 2));
+        var pixelHeight = Math.Max(1, (int)Math.Ceiling(cellHeight + padding * 2));
+        var target = new CanvasRenderTarget(creator, pixelWidth, pixelHeight, 96f);
 
-            var advance = (_advancesReady ? Advances[glyphIndex] : CellWidth) * scale;
-            var sourceX = glyphIndex * CellWidth;
-            drawing.DrawImage(bitmap,
-                new Rect(penX + (advance - cellWidth) / 2, y, cellWidth, cellHeight),
-                new Rect(sourceX, 0, CellWidth, CellHeight), 1);
-            penX += advance;
+        using (var session = target.CreateDrawingSession())
+        {
+            var penX = (float)padding;
+            var glyphY = (float)padding;
+            for (var index = 0; index < text.Length; index++)
+            {
+                var glyphIndex = text[index] - FirstChar;
+                if (glyphIndex < 0 || glyphIndex >= CharCount)
+                {
+                    continue;
+                }
+
+                var advance = (_advancesReady ? Advances[glyphIndex] : CellWidth) * scale;
+                session.DrawImage(atlas,
+                    new Rect(penX + (advance - cellWidth) / 2, glyphY, cellWidth, cellHeight),
+                    new Rect(glyphIndex * CellWidth, 0, CellWidth, CellHeight), 1);
+                penX += (float)advance;
+            }
         }
+
+        var offsetX = center ? -width / 2 - padding : right ? -width - padding : -padding;
+        var offsetY = middle ? -cellHeight / 2 - padding : bottom ? -cellHeight - padding : -padding;
+        return new CachedText(target, (float)offsetX, (float)offsetY);
     }
 
     private static async Task<CanvasBitmap> Load(ICanvasResourceCreator creator, byte[] png)

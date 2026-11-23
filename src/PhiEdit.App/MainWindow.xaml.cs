@@ -2019,7 +2019,51 @@ public sealed partial class MainWindow : Window
                 assets = ChartAssetStore.FromDirectory(Path.GetDirectoryName(path) ?? string.Empty);
             }
 
-            var document = RpeJson.Read(text);
+            var result = RpeJson.ReadWithWarnings(text);
+            var document = result.Chart;
+            var warnings = result.Warnings.ToList();
+            var info = assets.ReadInfo();
+            if ((string.IsNullOrWhiteSpace(document.SongName) || document.SongName == "Untitled") &&
+                (info.TryGetValue("Name", out var infoName) || info.TryGetValue("name", out infoName)))
+            {
+                document.SongName = infoName;
+            }
+
+            if (string.IsNullOrWhiteSpace(document.SongArtist) &&
+                (info.TryGetValue("Composer", out var infoComposer) || info.TryGetValue("composer", out infoComposer)))
+            {
+                document.SongArtist = infoComposer;
+            }
+
+            if ((string.IsNullOrWhiteSpace(document.ChartName) || document.ChartName == "Default") &&
+                (info.TryGetValue("Charter", out var infoCharter) || info.TryGetValue("charter", out infoCharter)))
+            {
+                document.ChartName = infoCharter;
+            }
+
+            if (string.IsNullOrWhiteSpace(document.Difficulty) &&
+                (info.TryGetValue("Level", out var infoLevel) || info.TryGetValue("level", out infoLevel)))
+            {
+                document.Difficulty = infoLevel;
+            }
+
+            if (string.IsNullOrWhiteSpace(document.SongFilename) &&
+                (info.TryGetValue("Song", out var infoSong) || info.TryGetValue("music", out infoSong)))
+            {
+                document.SongFilename = infoSong;
+            }
+
+            if (string.IsNullOrWhiteSpace(document.Background) &&
+                (info.TryGetValue("Picture", out var infoPicture) || info.TryGetValue("illustration", out infoPicture)))
+            {
+                document.Background = infoPicture;
+            }
+
+            if (document.Lines.Count == 0)
+            {
+                warnings.Add("谱面内没有可识别的判定线");
+            }
+
             _session.Document = document;
             _session.Assets = assets;
             _session.CurrentLineIndex = 0;
@@ -2029,7 +2073,9 @@ public sealed partial class MainWindow : Window
             _session.Viewport.ScrollToBeat(0);
             _currentFilePath = path;
             RefreshAll();
-            StatusReadout.Text = $"已打开 {Path.GetFileName(path)}";
+            StatusReadout.Text = warnings.Count == 0
+                ? $"已打开 {Path.GetFileName(path)}"
+                : $"已打开 {Path.GetFileName(path)} · 已忽略 {warnings.Count} 项：{string.Join("；", warnings.Take(2))}";
         }
         catch (Exception exception)
         {

@@ -1,4 +1,5 @@
 using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.Geometry;
 using Microsoft.Graphics.Canvas.Text;
 using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.UI.Xaml;
@@ -49,6 +50,9 @@ public sealed class PreviewCanvas : UserControl
     };
 
     private readonly SceneRuntime _scene = new();
+    private readonly List<NoiseAreaRuntime> _noiseRuntimes = new();
+    private ChartDocument? _noiseDocument;
+    private TempoMap? _noiseTempo;
     private readonly RpeTextureRenderer _textures = new();
     private readonly NoteSkinRenderer _packRenderer = new();
     private readonly TintedBitmapCache _tintCache = new();
@@ -594,6 +598,7 @@ public sealed class PreviewCanvas : UserControl
 
         var tempo = GetTempo(session.Document);
         _scene.Compile(session.Document, tempo);
+        EnsureNoiseRuntimes(session.Document, tempo);
         var seconds = _clock?.CurrentSeconds ?? tempo.SecondsAt(session.Viewport.Position);
         var scale = (float)viewport.Scale;
         var originX = (float)(viewport.Left + viewport.Width / 2);
@@ -631,12 +636,103 @@ public sealed class PreviewCanvas : UserControl
                 DrawGameUi(drawing, scale, seconds, viewport, tempo);
             }
 
+            DrawNoiseAreas(drawing, seconds, originX, originY, scale, positionScale, viewport);
+
             if (_options.ShowLineNumbers || _options.ShowLineDirection)
             {
                 DrawGuides(drawing, states, scale, selectedLine, viewport);
             }
         }
 
+    }
+
+    private void EnsureNoiseRuntimes(ChartDocument document, TempoMap tempo)
+    {
+        if (ReferenceEquals(_noiseDocument, document) && ReferenceEquals(_noiseTempo, tempo))
+        {
+            return;
+        }
+
+        _noiseDocument = document;
+        _noiseTempo = tempo;
+        _noiseRuntimes.Clear();
+        foreach (var area in document.BlockAreas)
+        {
+            _noiseRuntimes.Add(new NoiseAreaRuntime(area, tempo));
+        }
+    }
+
+    private void DrawNoiseAreas(CanvasDrawingSession drawing, double seconds,
+        float originX, float originY, float scale, (double X, double Y) positionScale, PreviewViewport viewport)
+    {
+        if (_noiseRuntimes.Count == 0)
+        {
+            return;
+        }
+
+        // 先采样当前可见的噪域；disabled 与 active 分层，挖空区域单独处理。
+        var visible = new List<(NoiseSample Sample, CanvasGeometry Geometry)>();
+        foreach (var runtime in _noiseRuntimes)
+        {
+            var sample = runtime.Sample(seconds);
+            if (sample is null || sample.State == "disabled")
+            {
+                continue;
+            }
+
+            var points = sample.Points
+                .Select(point => new Vector2(
+                    originX + (float)(point.X * positionScale.X * scale),
+                    originY - (float)(point.Y * positionScale.Y * scale)))
+                .ToArray();
+            if (points.Any(point => !float.IsFinite(point.X) || !float.IsFinite(point.Y)))
+            {
+                continue;
+            }
+
+            CanvasGeometry geometry;
+            try
+            {
+                geometry = CanvasGeometry.CreatePolygon(_creator!, points);
+            }
+            catch
+            {
+                continue;
+            }
+            visible.Add((sample, geometry));
+        }
+
+        if (visible.Count == 0)
+        {
+            return;
+        }
+
+        // 参考 noise-preview.mjs：普通区域叠加半透明红，isInvert 区域从音符画面中挖空。
+        // 先绘制挖空：用噪域几何裁剪一个图层，在其上以 destination-out 语义清除已有内容不可行，
+        // 这里改用半透明深色覆盖表达挖空边界，保证布局与原版一致且不破坏音符绘制。
+        foreach (var (sample, geometry) in visible)
+        {
+            Windows.UI.Color color;
+            if (sample.IsInvert)
+            {
+                color = Windows.UI.Color.FromArgb((byte)(90 * sample.Alpha), 20, 24, 30);
+            }
+            else
+            {
+                var r = (int)(127 + (182 - 127) * sample.ActivationMix);
+                var g = (int)(35 + (60 - 35) * sample.ActivationMix);
+                var b = (int)(35 + (60 - 35) * sample.ActivationMix);
+                color = Windows.UI.Color.FromArgb((byte)(255 * sample.Alpha), (byte)r, (byte)g, (byte)b);
+            }
+
+            drawing.FillGeometry(geometry, color);
+            if (sample.ActivationMix > 0.05f)
+            {
+                using var stroke = new Microsoft.Graphics.Canvas.Brushes.CanvasSolidColorBrush(
+                    _creator!, Windows.UI.Color.FromArgb((byte)(255 * sample.ActivationMix), 255, 84, 84));
+                drawing.DrawGeometry(geometry, stroke, Math.Max(2, 5 * scale));
+            }
+        }
     }
 
     private void DrawBackground(CanvasDrawingSession drawing, float width, float height, double scale)

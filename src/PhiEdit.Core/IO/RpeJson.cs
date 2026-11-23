@@ -13,6 +13,9 @@ namespace PhiEdit.Core.IO;
 /// META + BPMList + judgeLineGroup + judgeLineList，标准事件位于 line.eventLayers 数组，
 /// 扩展事件位于 line.extended。读入同时兼容本程序早期写出过的平铺旧格式。
 /// </summary>
+/// <summary>谱面读取结果与容错提示。</summary>
+public sealed record ChartReadResult(ChartDocument Chart, IReadOnlyList<string> Warnings);
+
 public static class RpeJson
 {
     private static readonly JsonSerializerOptions WriteOptions = new()
@@ -34,11 +37,29 @@ public static class RpeJson
         "events", "eventLayers", "extended",
     };
 
-    public static ChartDocument Read(string json)
+    public static ChartDocument Read(string json) => ReadWithWarnings(json).Chart;
+
+    public static ChartReadResult ReadWithWarnings(string json)
     {
+        var warnings = new List<string>();
         var text = json.TrimStart('\uFEFF');
-        using var parsed = JsonDocument.Parse(text);
+        using var parsed = JsonDocument.Parse(text, new JsonDocumentOptions
+        {
+            AllowTrailingCommas = true,
+            CommentHandling = JsonCommentHandling.Skip,
+        });
         var root = parsed.RootElement;
+        if (OfficialChartConverter.IsOfficial(root))
+        {
+            return OfficialChartConverter.Convert(root, warnings);
+        }
+
+        var chart = ReadCore(root, text, warnings);
+        return new ChartReadResult(chart, warnings);
+    }
+
+    private static ChartDocument ReadCore(JsonElement root, string text, List<string> warnings)
+    {
         var hasMeta = root.TryGetProperty("META", out var meta) && meta.ValueKind == JsonValueKind.Object;
         var metaElement = hasMeta ? meta : root;
 
@@ -75,12 +96,32 @@ public static class RpeJson
             chart.BpmList.Add(new TempoPoint(Beat.Zero, 120));
         }
 
+        var knownRoots = new HashSet<string>(LegacyRootKeys, StringComparer.OrdinalIgnoreCase)
+        {
+            "META", "BPMList", "judgeLineList", "judgeLineGroup",
+        };
+        foreach (var property in root.EnumerateObject())
+        {
+            if (!knownRoots.Contains(property.Name))
+            {
+                warnings.Add($"已忽略无法识别的根字段：{property.Name}");
+            }
+        }
+
         if (root.TryGetProperty("judgeLineList", out var lines) && lines.ValueKind == JsonValueKind.Array)
         {
             var index = 0;
             foreach (var lineElement in lines.EnumerateArray())
             {
-                chart.Lines.Add(ReadLine(lineElement, index));
+                try
+                {
+                    chart.Lines.Add(ReadLine(lineElement, index));
+                }
+                catch (Exception exception) when (exception is JsonException or FormatException or InvalidOperationException or OverflowException)
+                {
+                    warnings.Add($"第 {index + 1} 条判定线无法识别，已跳过：{exception.Message}");
+                }
+
                 index++;
             }
         }

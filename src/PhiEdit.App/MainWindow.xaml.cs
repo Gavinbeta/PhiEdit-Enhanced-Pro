@@ -133,8 +133,22 @@ public sealed partial class MainWindow : Window
         Landing.NewChartRequested += (_, _) => { EnterEditor(); OnNewClick(this, new RoutedEventArgs()); };
         Landing.OpenChartRequested += (_, _) => { EnterEditor(); OnOpenClick(this, new RoutedEventArgs()); };
         Landing.PreviewRequested += (_, _) => OpenPreviewForStartup();
-        Landing.SettingsRequested += (_, _) => OnSettingsClick(this, new RoutedEventArgs());
+        Landing.SettingsRequested += (_, _) => RefreshSkinList();
         Landing.ExitRequested += (_, _) => Close();
+        Landing.ImportSkinRequested += (_, _) => OnImportSkinClick(this, new RoutedEventArgs());
+        Landing.ApplySkinRequested += (_, _) => OnApplySkinClick(this, new RoutedEventArgs());
+        Landing.DeleteSkinRequested += (_, _) => OnDeleteSkinClick(this, new RoutedEventArgs());
+        Landing.LandingSkinSelectionChanged += (_, _) => OnSkinSelectionChanged(Landing.SkinListView, new SelectionChangedEventArgs(new System.Collections.Generic.List<object>(), new System.Collections.Generic.List<object>()));
+
+        // 主界面只显示标题与图标，隐藏谱面信息/版本号。
+        ApplyTitleBarForLanding(true);
+    }
+
+    /// <summary>主界面时标题栏只保留标题与图标；进入编辑器后恢复谱面信息与版本。</summary>
+    private void ApplyTitleBarForLanding(bool landing)
+    {
+        DocumentTitle.Visibility = landing ? Visibility.Collapsed : Visibility.Visible;
+        BuildVersion.Visibility = landing ? Visibility.Collapsed : Visibility.Visible;
     }
 
     /// <summary>隐藏主界面导航页，进入编辑工作区。</summary>
@@ -145,6 +159,7 @@ public sealed partial class MainWindow : Window
             return;
         }
         LandingOverlay.Visibility = Visibility.Collapsed;
+        ApplyTitleBarForLanding(false);
         RefreshAll();
         EditorCanvas.Invalidate();
         EmbeddedPreview.Invalidate();
@@ -485,15 +500,18 @@ public sealed partial class MainWindow : Window
     /// <summary>列表项与资源包的对应关系。</summary>
     private readonly List<PhiEdit.Core.Skins.NoteSkin> _skinItems = new();
 
-    /// <summary>刷新设置页的资源包列表。</summary>
+    /// <summary>刷新设置页的资源包列表（旧设置覆盖层与主界面设置页保持同步）。</summary>
     private void RefreshSkinList()
     {
         _skinItems.Clear();
         SkinList.Items.Clear();
+        Landing.SkinListView.Items.Clear();
         foreach (var skin in _session.Skins.Skins)
         {
             _skinItems.Add(skin);
-            SkinList.Items.Add($"{skin.Info.Name} · {skin.Info.Author}");
+            var label = $"{skin.Info.Name} · {skin.Info.Author}";
+            SkinList.Items.Add(label);
+            Landing.SkinListView.Items.Add(label);
         }
 
         if (_session.Skins.Active is not null)
@@ -503,37 +521,59 @@ public sealed partial class MainWindow : Window
                 if (_skinItems[index].Id == _session.Skins.Active.Id)
                 {
                     SkinList.SelectedIndex = index;
+                    Landing.SkinListView.SelectedIndex = index;
                     break;
                 }
             }
         }
     }
 
+    /// <summary>同时写入两处设置页的状态文本。</summary>
+    private void SetSettingsStatus(string text)
+    {
+        SettingsStatus.Text = text;
+        Landing.SettingsStatus = text;
+    }
+
     private void OnSkinSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (SkinList.SelectedIndex < 0 || SkinList.SelectedIndex >= _skinItems.Count)
+        var source = ReferenceEquals(sender, SkinList) ? SkinList : Landing.SkinListView;
+        var index = source.SelectedIndex;
+        if (index < 0 || index >= _skinItems.Count)
         {
             return;
         }
 
-        var skin = _skinItems[SkinList.SelectedIndex];
+        // 两个列表的选中状态保持一致。
+        var other = ReferenceEquals(sender, SkinList) ? Landing.SkinListView : SkinList;
+        if (other.SelectedIndex != index)
+        {
+            other.SelectedIndex = index;
+        }
 
-        SkinPreviewInfo.Text = $"名称：{skin.Info.Name}\n作者：{skin.Info.Author}";
-        SkinDescription.Text = string.IsNullOrWhiteSpace(skin.Info.Description)
-            ? "（无说明）"
-            : skin.Info.Description;
+        var skin = _skinItems[index];
+        var info = $"名称：{skin.Info.Name}\n作者：{skin.Info.Author}";
+        var description = string.IsNullOrWhiteSpace(skin.Info.Description) ? "（无说明）" : skin.Info.Description;
+
+        SkinPreviewInfo.Text = info;
+        SkinDescription.Text = description;
+        Landing.SkinPreview = info;
+        Landing.SkinDescriptionText = description;
 
         foreach (var warning in skin.Warnings)
         {
-            SettingsStatus.Text = warning;
+            SetSettingsStatus(warning);
         }
     }
 
     private void OnSettingsClick(object sender, RoutedEventArgs e)
     {
-        SettingsOverlay.Visibility = Visibility.Visible;
+        // 设置已迁移到主界面 NavigationView 的设置页，不再弹出子窗口。
+        LandingOverlay.Visibility = Visibility.Visible;
+        ApplyTitleBarForLanding(true);
+        Landing.Select("settings");
         RefreshSkinList();
-        SettingsStatus.Text = "准备就绪。";
+        Landing.SettingsStatus = "准备就绪。";
     }
 
     private void OnCloseSettingsClick(object sender, RoutedEventArgs e)
@@ -562,11 +602,11 @@ public sealed partial class MainWindow : Window
             _session.Skins.Activate(skin.Id);
             ApplySkinAsync(skin);
             RefreshSkinList();
-            SettingsStatus.Text = $"已导入资源包：{skin.Info.Name}";
+            SetSettingsStatus($"已导入资源包：{skin.Info.Name}");
         }
         catch (Exception exception)
         {
-            SettingsStatus.Text = $"资源包导入失败：{exception.Message}";
+            SetSettingsStatus($"资源包导入失败：{exception.Message}");
         }
     }
 
@@ -574,7 +614,7 @@ public sealed partial class MainWindow : Window
     {
         if (SkinList.SelectedIndex < 0 || SkinList.SelectedIndex >= _skinItems.Count)
         {
-            SettingsStatus.Text = "请先选择一个资源包。";
+            SetSettingsStatus("请先选择一个资源包。");
             return;
         }
 
@@ -582,14 +622,14 @@ public sealed partial class MainWindow : Window
 
         _session.Skins.Activate(skin.Id);
         ApplySkinAsync(skin);
-        SettingsStatus.Text = $"已应用皮肤：{skin.Info.Name}";
+        SetSettingsStatus($"已应用皮肤：{skin.Info.Name}");
     }
 
     private void OnDeleteSkinClick(object sender, RoutedEventArgs e)
     {
         if (SkinList.SelectedIndex < 0 || SkinList.SelectedIndex >= _skinItems.Count)
         {
-            SettingsStatus.Text = "请先选择一个资源包。";
+            SetSettingsStatus("请先选择一个资源包。");
             return;
         }
 
@@ -597,13 +637,13 @@ public sealed partial class MainWindow : Window
 
         if (skin.IsBuiltin)
         {
-            SettingsStatus.Text = "内置资源包不可删除。";
+            SetSettingsStatus("内置资源包不可删除。");
             return;
         }
 
         _session.Skins.Remove(skin.Id);
         RefreshSkinList();
-        SettingsStatus.Text = $"已删除资源包：{skin.Info.Name}";
+        SetSettingsStatus($"已删除资源包：{skin.Info.Name}");
     }
 
     // ---------------------------------------------------------------- 分栏

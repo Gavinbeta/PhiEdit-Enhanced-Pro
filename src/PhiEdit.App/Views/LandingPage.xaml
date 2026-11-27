@@ -7,97 +7,53 @@
              mc:Ignorable="d"
              d:DesignWidth="1200" d:DesignHeight="760">
 
-    <Grid Background="{ThemeResource AppBackgroundBrush}">
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="248" />
-            <ColumnDefinition Width="*" />
-        </Grid.ColumnDefinitions>
+    <!-- WinUI 3 原生 NavigationView：与系统设置应用同款侧栏 -->
+    <NavigationView x:Name="RootNavigation"
+                    PaneDisplayMode="Left"
+                    IsBackButtonVisible="Collapsed"
+                    IsSettingsVisible="False"
+                    SelectionChanged="OnNavigationSelectionChanged"
+                    OpenPaneLength="248"
+                    Background="{ThemeResource AppBackgroundBrush}">
 
-        <!-- 左侧导航栏：上组（谱面库 / 开始 / 渲染），下组（设置 / 关于 / 退出） -->
-        <Grid Grid.Column="0" Background="{ThemeResource SurfaceBrush}" BorderBrush="{ThemeResource StrokeBrush}"
-              BorderThickness="0,0,1,0">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
+        <NavigationView.MenuItems>
+            <NavigationViewItem x:Name="NavLibrary" Tag="library" Content="谱面库">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE8B7;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
+            <NavigationViewItem x:Name="NavStart" Tag="start" Content="开始" IsSelected="True">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE768;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
+            <NavigationViewItem x:Name="NavRender" Tag="render" Content="渲染">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE7B3;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
+        </NavigationView.MenuItems>
 
-            <!-- 品牌 -->
-            <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="10" Margin="20,22,16,26">
-                <Border Width="34" Height="34" CornerRadius="8" Background="{ThemeResource AccentBrush}"
-                        VerticalAlignment="Center">
-                    <TextBlock Text="P" Foreground="White" FontWeight="Bold" FontSize="17"
-                               HorizontalAlignment="Center" VerticalAlignment="Center" />
-                </Border>
-                <StackPanel VerticalAlignment="Center">
-                    <TextBlock Text="PhiEdit" FontSize="15" FontWeight="SemiBold"
-                               Foreground="{ThemeResource TextPrimaryBrush}" />
-                    <TextBlock Text="Enhanced Pro" FontSize="11"
-                               Foreground="{ThemeResource TextSecondaryBrush}" />
-                </StackPanel>
-            </StackPanel>
+        <NavigationView.FooterMenuItems>
+            <NavigationViewItem x:Name="NavSettings" Tag="settings" Content="设置">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE713;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
+            <NavigationViewItem x:Name="NavAbout" Tag="about" Content="关于">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE7F2;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
+            <NavigationViewItem x:Name="NavExit" Tag="exit" Content="退出">
+                <NavigationViewItem.Icon>
+                    <FontIcon Glyph="&#xE7E8;" />
+                </NavigationViewItem.Icon>
+            </NavigationViewItem>
+        </NavigationView.FooterMenuItems>
 
-            <!-- 主导航 -->
-            <StackPanel Grid.Row="1" Spacing="4" Margin="12,0,12,0">
-                <Button x:Name="NavLibrary" Tag="library" Click="OnNavigateClick" HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0"
-                        CornerRadius="8" Padding="14,10" Foreground="{ThemeResource TextPrimaryBrush}">
-                    <StackPanel Orientation="Horizontal" Spacing="12">
-                        <FontIcon Glyph="&#xE8B7;" FontSize="18" />
-                        <TextBlock Text="谱面库" FontSize="14" VerticalAlignment="Center" />
-                    </StackPanel>
-                </Button>
-                <Button x:Name="NavStart" Tag="start" Click="OnNavigateClick" HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0"
-                        CornerRadius="8" Padding="14,10" Foreground="{ThemeResource TextPrimaryBrush}">
-                    <StackPanel Orientation="Horizontal" Spacing="12">
-                        <FontIcon Glyph="&#xE768;" FontSize="18" />
-                        <TextBlock Text="开始" FontSize="14" VerticalAlignment="Center" />
-                    </StackPanel>
-                </Button>
-                <Button x:Name="NavRender" Tag="render" Click="OnNavigateClick" HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0"
-                        CornerRadius="8" Padding="14,10" Foreground="{ThemeResource TextPrimaryBrush}">
-                    <StackPanel Orientation="Horizontal" Spacing="12">
-                        <FontIcon Glyph="&#xE7B3;" FontSize="18" />
-                        <TextBlock Text="渲染" FontSize="14" VerticalAlignment="Center" />
-                    </StackPanel>
-                </Button>
-            </StackPanel>
-
-            <!-- 底部导航 -->
-            <StackPanel Grid.Row="2" Spacing="2" Margin="12,0,12,16">
-                <Rectangle Height="1" Fill="{ThemeResource StrokeBrush}" Margin="6,0,6,10" />
-                <Button x:Name="NavSettings" Tag="settings" Click="OnNavigateClick" HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0"
-                        CornerRadius="8" Padding="14,9" Foreground="{ThemeResource TextSecondaryBrush}">
-                    <StackPanel Orientation="Horizontal" Spacing="12">
-                        <FontIcon Glyph="&#xE713;" FontSize="16" />
-                        <TextBlock Text="设置" FontSize="13" VerticalAlignment="Center" />
-                    </StackPanel>
-                </Button>
-                <Button x:Name="NavAbout" Tag="about" Click="OnNavigateClick" HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0"
-                        CornerRadius="8" Padding="14,9" Foreground="{ThemeResource TextSecondaryBrush}">
-                    <StackPanel Orientation="Horizontal" Spacing="12">
-                        <FontIcon Glyph="&#xE7F2;" FontSize="16" />
-                        <TextBlock Text="关于" FontSize="13" VerticalAlignment="Center" />
-                    </StackPanel>
-                </Button>
-                <Button x:Name="NavExit" Tag="exit" Click="OnNavigateClick" HorizontalAlignment="Stretch"
-                        HorizontalContentAlignment="Left" Background="Transparent" BorderThickness="0"
-                        CornerRadius="8" Padding="14,9" Foreground="{ThemeResource TextSecondaryBrush}">
-                    <StackPanel Orientation="Horizontal" Spacing="12">
-                        <FontIcon Glyph="&#xE7E8;" FontSize="16" />
-                        <TextBlock Text="退出" FontSize="13" VerticalAlignment="Center" />
-                    </StackPanel>
-                </Button>
-            </StackPanel>
-        </Grid>
-
-        <!-- 右侧内容区：顶部无搜索栏 -->
-        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-            <Grid Padding="44,40,44,40" MaxWidth="980" HorizontalAlignment="Left">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <Grid Padding="44,40,44,40" MaxWidth="1000" HorizontalAlignment="Left">
 
                 <!-- 开始页 -->
                 <StackPanel x:Name="StartPanel" Visibility="Visible">
@@ -121,7 +77,7 @@
                     <Border Style="{StaticResource PanelCardStyle}">
                         <StackPanel Spacing="10">
                             <TextBlock Text="进入编辑器" Style="{StaticResource SectionTitleStyle}" />
-                            <TextBlock Text="继续上次打开的谱面，直接进入编辑工作区。"
+                            <TextBlock Text="继续当前谱面，直接进入编辑工作区。"
                                        FontSize="13" Foreground="{ThemeResource TextSecondaryBrush}" />
                             <Button Content="开始编辑" Click="OnStartClick" Margin="0,4,0,0" />
                         </StackPanel>
@@ -137,7 +93,7 @@
                     <Border Style="{StaticResource PanelCardStyle}">
                         <StackPanel Spacing="10">
                             <TextBlock Text="即将推出" Style="{StaticResource SectionTitleStyle}" />
-                            <TextBlock x:Name="LibraryHint" Text="谱面库功能尚未实现。你仍可通过工具栏打开本地谱面文件。"
+                            <TextBlock Text="谱面库功能尚未实现。你仍可通过工具栏打开本地谱面文件。"
                                        FontSize="13" TextWrapping="Wrap" Foreground="{ThemeResource TextSecondaryBrush}" />
                             <Button Content="打开本地谱面" Click="OnOpenChartClick" Margin="0,4,0,0" />
                         </StackPanel>
@@ -160,6 +116,60 @@
                     </Border>
                 </StackPanel>
 
+                <!-- 设置页：系统设置风格 + 搜索 -->
+                <Grid x:Name="SettingsPanel" Visibility="Collapsed">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Text="设置" FontSize="26" FontWeight="SemiBold"
+                               Foreground="{ThemeResource TextPrimaryBrush}" Margin="0,0,0,8" />
+
+                    <AutoSuggestBox x:Name="SettingsSearch" Grid.Row="1" PlaceholderText="查找设置"
+                                    QueryIcon="Find" TextChanged="OnSettingsSearchChanged"
+                                    Margin="0,4,0,20" HorizontalAlignment="Left" Width="420" />
+
+                    <StackPanel Grid.Row="2" Spacing="10">
+                        <!-- 资源包设置卡片 -->
+                        <Border Style="{StaticResource PanelCardStyle}" x:Name="SkinSettingsCard">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="音符资源包" Style="{StaticResource SectionTitleStyle}" />
+                                <TextBlock Text="导入、应用或删除音符皮肤资源包，编辑区与实时预览同步生效。"
+                                           FontSize="13" TextWrapping="Wrap" Foreground="{ThemeResource TextSecondaryBrush}" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button Content="导入资源包" Click="OnImportSkinClick" Style="{StaticResource AccentButtonStyle}" />
+                                    <Button Content="应用此皮肤" Click="OnApplySkinClick" />
+                                    <Button Content="删除" Click="OnDeleteSkinClick" />
+                                </StackPanel>
+                                <ListView x:Name="SkinList" SelectionMode="Single" SelectionChanged="OnLandingSkinSelectionChanged"
+                                          MaxHeight="180" />
+                                <TextBlock x:Name="SkinPreviewInfo" Style="{StaticResource StatusTextStyle}" TextWrapping="Wrap" />
+                                <TextBlock x:Name="SkinDescription" Style="{StaticResource StatusTextStyle}" TextWrapping="Wrap" />
+                                <TextBlock x:Name="LandingSettingsStatus" Style="{StaticResource StatusTextStyle}" Text="准备就绪。" />
+                            </StackPanel>
+                        </Border>
+                        <!-- 更多设置占位卡片（可被搜索过滤） -->
+                        <Border Style="{StaticResource PanelCardStyle}" x:Name="PreviewSettingsCard">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="实时预览" Style="{StaticResource SectionTitleStyle}" />
+                                <TextBlock Text="编辑区下方铺满实时预览，半透明网格叠加；可从工具栏打开独立预览窗口。"
+                                           FontSize="13" TextWrapping="Wrap" Foreground="{ThemeResource TextSecondaryBrush}" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource PanelCardStyle}" x:Name="AboutSettingsCard">
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="关于" Style="{StaticResource SectionTitleStyle}" />
+                                <TextBlock x:Name="SettingsVersionText" Text="v1.9.0_BETA1" FontSize="13"
+                                           Foreground="{ThemeResource TextSecondaryBrush}" />
+                            </StackPanel>
+                        </Border>
+                        <TextBlock x:Name="SettingsNoResult" Text="没有找到匹配的设置。" Visibility="Collapsed"
+                                   Style="{StaticResource StatusTextStyle}" />
+                    </StackPanel>
+                </Grid>
+
                 <!-- 关于页 -->
                 <StackPanel x:Name="AboutPanel" Visibility="Collapsed">
                     <TextBlock Text="关于" FontSize="26" FontWeight="SemiBold"
@@ -169,7 +179,7 @@
                     <Border Style="{StaticResource PanelCardStyle}">
                         <StackPanel Spacing="10">
                             <TextBlock Text="版本信息" Style="{StaticResource SectionTitleStyle}" />
-                            <TextBlock x:Name="AboutVersion" Text="v1.8.0_BETA1" FontSize="14"
+                            <TextBlock x:Name="AboutVersion" Text="v1.9.0_BETA1" FontSize="14"
                                        Foreground="{ThemeResource TextPrimaryBrush}" />
                             <TextBlock Text="基于 Re:PhiEdit Next 逻辑重制的原生 WinUI 3 制谱器。"
                                        FontSize="13" TextWrapping="Wrap" Foreground="{ThemeResource TextSecondaryBrush}" />
@@ -181,5 +191,5 @@
 
             </Grid>
         </ScrollViewer>
-    </Grid>
+    </NavigationView>
 </UserControl>

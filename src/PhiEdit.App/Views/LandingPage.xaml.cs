@@ -1,6 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Navigation;
+using PhiEdit.Core.Charts;
 
 namespace PhiEdit.App.Views;
 
@@ -22,11 +22,21 @@ public sealed partial class LandingPage : UserControl
     public event EventHandler? ApplySkinRequested;
     public event EventHandler? DeleteSkinRequested;
     public event EventHandler? LandingSkinSelectionChanged;
+    public event EventHandler<ChartLibraryItem>? LibraryOpenRequested;
+    public event EventHandler? LibraryImportRequested;
+    public event EventHandler? LibraryNewRequested;
+    public event EventHandler<ChartLibraryItem>? LibraryExportRequested;
 
     public LandingPage()
     {
         InitializeComponent();
-        Select("start");
+        Select("library");
+    }
+
+    /// <summary>填充谱面库列表。</summary>
+    public void SetLibraryItems(IReadOnlyList<ChartLibraryItem> items)
+    {
+        LibraryList.ItemsSource = items;
     }
 
     /// <summary>设置关于页与设置页显示的版本文本。</summary>
@@ -129,4 +139,27 @@ public sealed partial class LandingPage : UserControl
     private void OnDeleteSkinClick(object sender, RoutedEventArgs e) => DeleteSkinRequested?.Invoke(this, EventArgs.Empty);
     private void OnLandingSkinSelectionChanged(object sender, SelectionChangedEventArgs e) =>
         LandingSkinSelectionChanged?.Invoke(this, EventArgs.Empty);
+
+    private void OnLibrarySelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        LibraryExportButton.IsEnabled = LibraryList.SelectedItem is ChartLibraryItem;
+
+    private void OnLibraryImportClick(object sender, RoutedEventArgs e) => LibraryImportRequested?.Invoke(this, EventArgs.Empty);
+
+    private void OnLibraryNewClick(object sender, RoutedEventArgs e) => LibraryNewRequested?.Invoke(this, EventArgs.Empty);
+
+    private void OnLibraryOpenClick(object sender, RoutedEventArgs e)
+    {
+        if ((sender as Button)?.Tag is ChartLibraryItem item)
+        {
+            LibraryOpenRequested?.Invoke(this, item);
+        }
+    }
+
+    private void OnLibraryExportClick(object sender, RoutedEventArgs e)
+    {
+        if (LibraryList.SelectedItem is ChartLibraryItem item)
+        {
+            LibraryExportRequested?.Invoke(this, item);
+        }
+    }
 }

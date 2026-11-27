@@ -44,6 +44,9 @@ public sealed partial class MainWindow : Window
 
     private string? _currentFilePath;
 
+    /// <summary>谱面库持久化服务：记录导入、新建与示例谱面。</summary>
+    private readonly ChartLibraryStore _library = new();
+
     private bool _refreshingInspector;
 
     private Note? _noteEditSnapshot;
@@ -140,6 +143,16 @@ public sealed partial class MainWindow : Window
         Landing.DeleteSkinRequested += (_, _) => OnDeleteSkinClick(this, new RoutedEventArgs());
         Landing.LandingSkinSelectionChanged += (_, _) => OnSkinSelectionChanged(Landing.SkinListView, new SelectionChangedEventArgs(new System.Collections.Generic.List<object>(), new System.Collections.Generic.List<object>()));
 
+        // 谱面库：加载索引、登记内置示例，接入导入/新建/打开/导出事件。
+        _library.Load();
+        var builtinDir = Path.Combine(AppContext.BaseDirectory, "Assets", "SampleCharts");
+        _library.EnsureSeeded(builtinDir);
+        RefreshLibraryList();
+        Landing.LibraryImportRequested += (_, _) => _ = ImportToLibrary();
+        Landing.LibraryNewRequested += (_, _) => NewChartToLibrary();
+        Landing.LibraryOpenRequested += (_, item) => OpenFromLibrary(item);
+        Landing.LibraryExportRequested += (_, item) => _ = ExportFromLibrary(item);
+
         // 主界面只显示标题与图标，隐藏谱面信息/版本号。
         ApplyTitleBarForLanding(true);
     }
@@ -163,6 +176,76 @@ public sealed partial class MainWindow : Window
         RefreshAll();
         EditorCanvas.Invalidate();
         EmbeddedPreview.Invalidate();
+    }
+
+    private void RefreshLibraryList() => Landing.SetLibraryItems(_library.Items);
+
+    /// <summary>从文件导入谱面到库（复制文件副本并登记元数据）。</summary>
+    private async Task ImportToLibrary()
+    {
+        var picker = new FileOpenPicker();
+        picker.FileTypeFilter.Add(".json");
+        picker.FileTypeFilter.Add(".pec");
+        picker.FileTypeFilter.Add(".pez");
+        picker.FileTypeFilter.Add(".zip");
+        InitializeWithWindow.Initialize(picker, GetWindowHandle());
+        var file = await picker.PickSingleFileAsync();
+        if (file is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var item = _library.Import(file.Path);
+            RefreshLibraryList();
+            Landing.SettingsStatus = $"已导入到谱面库：{item.Name}";
+        }
+        catch (Exception exception)
+        {
+            Landing.SettingsStatus = $"导入失败：{exception.Message}";
+        }
+    }
+
+    /// <summary>在库中创建新谱面并进入编辑器。</summary>
+    private void NewChartToLibrary()
+    {
+        var item = _library.Create(RpeJson.Write(new ChartDocument()), "未命名谱面");
+        RefreshLibraryList();
+        LoadChartPath(_library.GetPath(item));
+        EnterEditor();
+    }
+
+    /// <summary>从谱面库打开条目并进入编辑器。</summary>
+    private void OpenFromLibrary(ChartLibraryItem item)
+    {
+        LoadChartPath(_library.GetPath(item));
+        EnterEditor();
+    }
+
+    /// <summary>导出库内谱面到用户指定位置（当前仅单条，多选导出后续实现）。</summary>
+    private async Task ExportFromLibrary(ChartLibraryItem item)
+    {
+        var picker = new FileSavePicker();
+        picker.FileTypeChoices.Add(new KeyValuePair<string, IList<string>>("谱面文件",
+            new[] { Path.GetExtension(item.FileName) }));
+        picker.SuggestedFileName = string.IsNullOrWhiteSpace(item.Name) ? "chart" : item.Name;
+        InitializeWithWindow.Initialize(picker, GetWindowHandle());
+        var file = await picker.PickSaveFileAsync();
+        if (file is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _library.Export(item, file.Path);
+            Landing.SettingsStatus = $"已导出：{file.Name}";
+        }
+        catch (Exception exception)
+        {
+            Landing.SettingsStatus = $"导出失败：{exception.Message}";
+        }
     }
 
     // ---------------------------------------------------------------- 初始化

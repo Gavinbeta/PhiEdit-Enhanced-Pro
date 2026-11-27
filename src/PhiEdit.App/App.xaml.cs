@@ -17,9 +17,14 @@ public partial class App : Application
         var window = new MainWindow();
         _window = window;
         var arguments = args.Arguments.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (arguments.Length > 0 && !arguments[0].StartsWith("--", StringComparison.Ordinal))
+        // 第一个既不是开关、也不是纯数字的参数视为谱面路径。
+        var pathArgument = arguments.FirstOrDefault(item =>
+            !item.StartsWith("--", StringComparison.Ordinal) &&
+            !double.TryParse(item, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out _));
+        if (pathArgument is not null)
         {
-            window.OpenStartupFile(arguments[0]);
+            window.OpenStartupFile(pathArgument);
         }
         var beatArgument = arguments.FirstOrDefault(item => double.TryParse(item,
             System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _));
@@ -28,8 +33,9 @@ public partial class App : Application
         {
             window.SetStartupBeat(beat);
         }
-        // 带启动参数（谱面文件/拍号/预览）时直接进入编辑器，避免自动化与查看流程被导航页挡住。
-        if (arguments.Length > 0)
+        // 程序启动始终显示主界面（谱面库页），编辑器只是其中的子页面。
+        // 仅显式 --editor 参数时直接进入编辑器（供自动化/外部调用使用）。
+        if (arguments.Contains("--editor", StringComparer.OrdinalIgnoreCase))
         {
             window.EnterEditor();
         }

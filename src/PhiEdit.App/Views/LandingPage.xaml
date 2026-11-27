@@ -4,6 +4,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:charts="using:PhiEdit.Core.Charts"
              mc:Ignorable="d"
              d:DesignWidth="1200" d:DesignHeight="760">
 
@@ -17,12 +18,12 @@
                     Background="{ThemeResource AppBackgroundBrush}">
 
         <NavigationView.MenuItems>
-            <NavigationViewItem x:Name="NavLibrary" Tag="library" Content="谱面库">
+            <NavigationViewItem x:Name="NavLibrary" Tag="library" Content="谱面库" IsSelected="True">
                 <NavigationViewItem.Icon>
                     <FontIcon Glyph="&#xE8B7;" />
                 </NavigationViewItem.Icon>
             </NavigationViewItem>
-            <NavigationViewItem x:Name="NavStart" Tag="start" Content="开始" IsSelected="True">
+            <NavigationViewItem x:Name="NavStart" Tag="start" Content="开始">
                 <NavigationViewItem.Icon>
                     <FontIcon Glyph="&#xE768;" />
                 </NavigationViewItem.Icon>
@@ -85,20 +86,49 @@
                 </StackPanel>
 
                 <!-- 谱面库页 -->
-                <StackPanel x:Name="LibraryPanel" Visibility="Collapsed">
-                    <TextBlock Text="谱面库" FontSize="26" FontWeight="SemiBold"
-                               Foreground="{ThemeResource TextPrimaryBrush}" Margin="0,0,0,8" />
-                    <TextBlock Text="本地谱面管理（规划中）" FontSize="14"
-                               Foreground="{ThemeResource TextSecondaryBrush}" Margin="0,0,0,28" />
-                    <Border Style="{StaticResource PanelCardStyle}">
-                        <StackPanel Spacing="10">
-                            <TextBlock Text="即将推出" Style="{StaticResource SectionTitleStyle}" />
-                            <TextBlock Text="谱面库功能尚未实现。你仍可通过工具栏打开本地谱面文件。"
-                                       FontSize="13" TextWrapping="Wrap" Foreground="{ThemeResource TextSecondaryBrush}" />
-                            <Button Content="打开本地谱面" Click="OnOpenChartClick" Margin="0,4,0,0" />
-                        </StackPanel>
+                <Grid x:Name="LibraryPanel" Visibility="Collapsed">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0" Margin="0,0,0,8">
+                        <TextBlock Text="谱面库" FontSize="26" FontWeight="SemiBold"
+                                   Foreground="{ThemeResource TextPrimaryBrush}" />
+                        <TextBlock Text="导入过的、新建的与示例谱面都会保存在这里" FontSize="14"
+                                   Foreground="{ThemeResource TextSecondaryBrush}" Margin="0,4,0,0" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,4,0,20">
+                        <Button Content="导入谱面" Click="OnLibraryImportClick" Style="{StaticResource AccentButtonStyle}" />
+                        <Button Content="新建谱面" Click="OnLibraryNewClick" />
+                        <Button x:Name="LibraryExportButton" Content="导出选中" Click="OnLibraryExportClick" IsEnabled="False"
+                                ToolTipService.ToolTip="多选导出后续实现，当前仅支持单条导出" />
+                    </StackPanel>
+
+                    <Border Grid.Row="2" Style="{StaticResource PanelCardStyle}">
+                        <ListView x:Name="LibraryList" SelectionMode="Single" SelectionChanged="OnLibrarySelectionChanged">
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="charts:ChartLibraryItem">
+                                    <Grid Padding="4,6" ColumnDefinitions="*,Auto">
+                                        <StackPanel Spacing="2">
+                                            <TextBlock Text="{x:Bind Name}" FontSize="14" FontWeight="SemiBold"
+                                                       Foreground="{ThemeResource TextPrimaryBrush}" />
+                                            <TextBlock Text="{x:Bind Subtitle}" FontSize="12"
+                                                       Foreground="{ThemeResource TextSecondaryBrush}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                            <TextBlock Text="{x:Bind Source}" FontSize="11"
+                                                       Foreground="{ThemeResource TextSecondaryBrush}" />
+                                            <Button Content="进入编辑" Tag="{x:Bind}" Click="OnLibraryOpenClick" />
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
                     </Border>
-                </StackPanel>
+                </Grid>
 
                 <!-- 渲染页 -->
                 <StackPanel x:Name="RenderPanel" Visibility="Collapsed">
@@ -161,7 +191,7 @@
                         <Border Style="{StaticResource PanelCardStyle}" x:Name="AboutSettingsCard">
                             <StackPanel Spacing="8">
                                 <TextBlock Text="关于" Style="{StaticResource SectionTitleStyle}" />
-                                <TextBlock x:Name="SettingsVersionText" Text="v1.9.0_BETA1" FontSize="13"
+                                <TextBlock x:Name="SettingsVersionText" Text="v1.10.0_BETA1" FontSize="13"
                                            Foreground="{ThemeResource TextSecondaryBrush}" />
                             </StackPanel>
                         </Border>
@@ -179,7 +209,7 @@
                     <Border Style="{StaticResource PanelCardStyle}">
                         <StackPanel Spacing="10">
                             <TextBlock Text="版本信息" Style="{StaticResource SectionTitleStyle}" />
-                            <TextBlock x:Name="AboutVersion" Text="v1.9.0_BETA1" FontSize="14"
+                            <TextBlock x:Name="AboutVersion" Text="v1.10.0_BETA1" FontSize="14"
                                        Foreground="{ThemeResource TextPrimaryBrush}" />
                             <TextBlock Text="基于 Re:PhiEdit Next 逻辑重制的原生 WinUI 3 制谱器。"
                                        FontSize="13" TextWrapping="Wrap" Foreground="{ThemeResource TextSecondaryBrush}" />

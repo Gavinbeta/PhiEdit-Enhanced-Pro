@@ -39,6 +39,14 @@ public sealed class ChartDocument
 
     public List<JudgeLine> Lines { get; } = new();
 
+    /// <summary>
+    /// 噪域列表（旧格式 blockAreaList 转换而来）。噪域是覆盖在音符之上的遮罩/反色区域。
+    /// </summary>
+    public List<NoiseArea> BlockAreas { get; } = new();
+
+    /// <summary>旧格式噪域兼容：忽略三重反色翻转，参考 noiseAreaOptions.ignoreTripleInversion。</summary>
+    public bool IgnoreTripleInversion { get; set; }
+
     /// <summary>文档被修改后置位，供界面提示与自动保存使用。</summary>
     public bool IsDirty { get; set; }
 

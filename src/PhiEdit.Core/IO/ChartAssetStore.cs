@@ -291,6 +291,46 @@ public sealed class ChartAssetStore
         return audios.Count == 1 ? audios[0] : null;
     }
 
+    /// <summary>读取包内 info.txt / info.yml 的简单键值，用于补齐旧格式谱面的标题与难度。</summary>
+    public IReadOnlyDictionary<string, string> ReadInfo()
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var infoName in _files.Keys.Where(name =>
+                     Path.GetFileName(name).Equals("info.txt", StringComparison.OrdinalIgnoreCase) ||
+                     Path.GetFileName(name).Equals("info.yml", StringComparison.OrdinalIgnoreCase)))
+        {
+            var text = Encoding.UTF8.GetString(_files[infoName]);
+            foreach (var rawLine in text.Split('\n'))
+            {
+                var line = rawLine.Trim();
+                if (line.Length == 0 || line.StartsWith('#') || line.StartsWith('['))
+                {
+                    continue;
+                }
+
+                var separator = line.IndexOf(':');
+                if (separator <= 0)
+                {
+                    continue;
+                }
+
+                var key = line[..separator].Trim().Trim('"');
+                var value = line[(separator + 1)..].Trim();
+                if (value.Length >= 2 && value[0] == '"' && value[^1] == '"')
+                {
+                    value = value[1..^1].Replace("\\\"", "\"", StringComparison.Ordinal);
+                }
+
+                if (key.Length > 0)
+                {
+                    result[key] = value;
+                }
+            }
+        }
+
+        return result;
+    }
+
     public static bool IsImage(string name) =>
         Regex.IsMatch(Path.GetExtension(name), @"^\.(png|jpe?g|webp|gif|bmp|avif)$", RegexOptions.IgnoreCase);
 

@@ -10,6 +10,7 @@ using PhiEdit.Core.Charts;
 using PhiEdit.Core.Editing;
 using PhiEdit.Core.IO;
 using PhiEdit.Core.Playback;
+using PhiEdit.Core.Preview;
 using PhiEdit.Core.Rendering;
 using Windows.Foundation;
 using Windows.Graphics;
@@ -28,6 +29,9 @@ public sealed partial class MainWindow : Window
     private readonly ChartEditor _editor;
 
     private readonly PlaybackClock _clock = new();
+
+    /// <summary>编辑区底层实时预览的时间源，只读跟随编辑播放头。</summary>
+    private readonly FollowClockSource _embeddedClock;
 
     private readonly EditorPalette _palette = new();
 
@@ -49,6 +53,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         _editor = new ChartEditor(_session);
+        _embeddedClock = new FollowClockSource(_clock);
         InitializeComponent();
 
         ExtendsContentIntoTitleBar = true;
@@ -61,6 +66,11 @@ public sealed partial class MainWindow : Window
         EditorCanvas.Editor = _editor;
         EditorCanvas.Palette = _palette;
         EditorCanvas.Renderer = _skinRenderer;
+
+        // 嵌入编辑区的实时预览：与独立窗口复用同一个 PreviewCanvas 渲染代码，
+        // 时间源只读跟随编辑播放头。画布自身锁定比例、居中并以黑边填充多余空间。
+        EmbeddedPreview.Session = _session;
+        EmbeddedPreview.Clock = _embeddedClock;
 
         EditorCanvas.SkinLoadFailed += (_, message) => StatusReadout.Text = message;
         EditorCanvas.SelectionChanged += (_, _) => OnSelectionChanged();
@@ -649,6 +659,7 @@ public sealed partial class MainWindow : Window
 
         RefreshTimeline();
         EditorCanvas.Invalidate();
+        EmbeddedPreview.Invalidate();
         _previewWindow?.SyncFromEditor(_session.Viewport.Position);
     }
 
@@ -662,6 +673,7 @@ public sealed partial class MainWindow : Window
         RefreshInspector();
         RefreshTimeline();
         EditorCanvas.Invalidate();
+        EmbeddedPreview.Invalidate();
     }
 
     private void RefreshTimeline()
@@ -879,6 +891,7 @@ public sealed partial class MainWindow : Window
         _session.Viewport.SetPosition(beat);
         Scrubber.Value = Math.Clamp(beat, Scrubber.Minimum, Scrubber.Maximum);
         RefreshTimeline();
+        EmbeddedPreview.Invalidate();
         _previewWindow?.SyncFromEditor(beat);
     }
 
@@ -936,6 +949,20 @@ public sealed partial class MainWindow : Window
     }
 
     private void OnPreviewClick(object sender, RoutedEventArgs e) => OpenPreviewForStartup();
+
+    /// <summary>
+    /// 切换编辑网格叠加层的显示。隐藏后编辑区只剩纯实时预览画布；
+    /// 显示时网格为半透明，可透过它直接看到下层的实时预览。
+    /// </summary>
+    private void OnGridOverlayClick(object sender, RoutedEventArgs e)
+    {
+        var show = EditorCanvas.Visibility == Visibility.Collapsed;
+        EditorCanvas.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        EditorSplitter.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        GridOverlayGlyph.Glyph = show ? "\uE8A4" : "\uE7B3";
+        StatusReadout.Text = show ? "已显示编辑网格" : "已隐藏编辑网格（纯预览）";
+        EmbeddedPreview.Invalidate();
+    }
 
     private void OnLineSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -2019,7 +2046,51 @@ public sealed partial class MainWindow : Window
                 assets = ChartAssetStore.FromDirectory(Path.GetDirectoryName(path) ?? string.Empty);
             }
 
-            var document = RpeJson.Read(text);
+            var result = RpeJson.ReadWithWarnings(text);
+            var document = result.Chart;
+            var warnings = result.Warnings.ToList();
+            var info = assets.ReadInfo();
+            if ((string.IsNullOrWhiteSpace(document.SongName) || document.SongName == "Untitled") &&
+                (info.TryGetValue("Name", out var infoName) || info.TryGetValue("name", out infoName)))
+            {
+                document.SongName = infoName;
+            }
+
+            if (string.IsNullOrWhiteSpace(document.SongArtist) &&
+                (info.TryGetValue("Composer", out var infoComposer) || info.TryGetValue("composer", out infoComposer)))
+            {
+                document.SongArtist = infoComposer;
+            }
+
+            if ((string.IsNullOrWhiteSpace(document.ChartName) || document.ChartName == "Default") &&
+                (info.TryGetValue("Charter", out var infoCharter) || info.TryGetValue("charter", out infoCharter)))
+            {
+                document.ChartName = infoCharter;
+            }
+
+            if (string.IsNullOrWhiteSpace(document.Difficulty) &&
+                (info.TryGetValue("Level", out var infoLevel) || info.TryGetValue("level", out infoLevel)))
+            {
+                document.Difficulty = infoLevel;
+            }
+
+            if (string.IsNullOrWhiteSpace(document.SongFilename) &&
+                (info.TryGetValue("Song", out var infoSong) || info.TryGetValue("music", out infoSong)))
+            {
+                document.SongFilename = infoSong;
+            }
+
+            if (string.IsNullOrWhiteSpace(document.Background) &&
+                (info.TryGetValue("Picture", out var infoPicture) || info.TryGetValue("illustration", out infoPicture)))
+            {
+                document.Background = infoPicture;
+            }
+
+            if (document.Lines.Count == 0)
+            {
+                warnings.Add("谱面内没有可识别的判定线");
+            }
+
             _session.Document = document;
             _session.Assets = assets;
             _session.CurrentLineIndex = 0;
@@ -2029,7 +2100,9 @@ public sealed partial class MainWindow : Window
             _session.Viewport.ScrollToBeat(0);
             _currentFilePath = path;
             RefreshAll();
-            StatusReadout.Text = $"已打开 {Path.GetFileName(path)}";
+            StatusReadout.Text = warnings.Count == 0
+                ? $"已打开 {Path.GetFileName(path)}"
+                : $"已打开 {Path.GetFileName(path)} · 已忽略 {warnings.Count} 项：{string.Join("；", warnings.Take(2))}";
         }
         catch (Exception exception)
         {

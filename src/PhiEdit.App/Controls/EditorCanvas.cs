@@ -91,6 +91,15 @@ public sealed class EditorCanvas : UserControl
 
     public EditorPalette Palette { get; set; } = new();
 
+    /// <summary>
+    /// 透明背景模式：不绘制不透明底色，让下层的实时预览画布透出来。
+    /// 网格、音符、事件与播放头的绘制保持不变。默认关闭，保持独立使用场景的外观。
+    /// </summary>
+    public bool TransparentBackground { get; set; }
+
+    /// <summary>透明模式下的底色不透明度（0 = 完全透出下层预览，1 = 不透明）。预留给后续调节。</summary>
+    public double BackgroundOpacity { get; set; } = 0.35;
+
     public NoteSkinRenderer? Renderer { get; set; }
 
     public double NoteSize { get; set; } = 200;
@@ -206,7 +215,10 @@ public sealed class EditorCanvas : UserControl
     {
         var session = _session;
         var drawing = args.DrawingSession;
-        drawing.Clear(Palette.Surface.ToWinColor());
+        // 透明模式下用全透明清屏，让下层实时预览画布透出；底色以半透明矩形叠加。
+        drawing.Clear(TransparentBackground
+            ? Windows.UI.Color.FromArgb(0, 0, 0, 0)
+            : Palette.Surface.ToWinColor());
 
         var width = _canvas.ActualWidth;
         var height = _canvas.ActualHeight;
@@ -225,7 +237,18 @@ public sealed class EditorCanvas : UserControl
         viewport.NoteWidth = Math.Max(80, layout.LeftWidth - Palette.GridInsetX * 2);
 
         // 两侧底色一致，中间不再画灰色区域，视觉上是一块连续画布。
-        drawing.FillRectangle(new Rect(0, 0, (float)width, (float)height), Palette.Surface.ToWinColor());
+        // 透明模式下降低底色不透明度，让后方预览透出，同时保留网格的可读性。
+        if (TransparentBackground)
+        {
+            var surface = Palette.Surface;
+            var alpha = (byte)Math.Round(Math.Clamp(BackgroundOpacity, 0, 1) * 255);
+            drawing.FillRectangle(new Rect(0, 0, (float)width, (float)height),
+                Windows.UI.Color.FromArgb(alpha, surface.R, surface.G, surface.B));
+        }
+        else
+        {
+            drawing.FillRectangle(new Rect(0, 0, (float)width, (float)height), Palette.Surface.ToWinColor());
+        }
 
         var playheadY = viewport.PlayheadY;
         DrawTimeGrid(drawing, session, viewport, 0, layout.LeftWidth, playheadY,

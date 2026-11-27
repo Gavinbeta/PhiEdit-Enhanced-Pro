@@ -20,3 +20,6 @@ artifacts/
 
 ## 界面自测工具（不入库）
 .tools/
+
+## 项目内部资料（开发约定、工作日志与记忆，不上传 GitHub）
+.workbuddy/

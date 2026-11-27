@@ -98,7 +98,7 @@ public sealed class EditorCanvas : UserControl
     public bool TransparentBackground { get; set; }
 
     /// <summary>透明模式下的底色不透明度（0 = 完全透出下层预览，1 = 不透明）。预留给后续调节。</summary>
-    public double BackgroundOpacity { get; set; } = 0.35;
+    public double BackgroundOpacity { get; set; } = 0.12;
 
     public NoteSkinRenderer? Renderer { get; set; }
 

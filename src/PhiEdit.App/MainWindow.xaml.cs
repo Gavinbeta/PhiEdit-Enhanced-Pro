@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using PhiEdit.App.Controls;
 using PhiEdit.App.Services;
+using PhiEdit.App.Views;
 using PhiEdit.Core.Beats;
 using PhiEdit.Core.Charts;
 using PhiEdit.Core.Editing;
@@ -125,6 +126,28 @@ public sealed partial class MainWindow : Window
 
         // 资源包必须在预览窗口打开前装载，否则命中音与皮肤都会是空。
         InitializeSkins();
+
+        // 主界面特色功能导航页：事件委托回主窗口处理，保持编辑器逻辑集中。
+        Landing.SetVersion(BuildVersion.Text.Replace("v", string.Empty));
+        Landing.StartRequested += (_, _) => EnterEditor();
+        Landing.NewChartRequested += (_, _) => { EnterEditor(); OnNewClick(this, new RoutedEventArgs()); };
+        Landing.OpenChartRequested += (_, _) => { EnterEditor(); OnOpenClick(this, new RoutedEventArgs()); };
+        Landing.PreviewRequested += (_, _) => OpenPreviewForStartup();
+        Landing.SettingsRequested += (_, _) => OnSettingsClick(this, new RoutedEventArgs());
+        Landing.ExitRequested += (_, _) => Close();
+    }
+
+    /// <summary>隐藏主界面导航页，进入编辑工作区。</summary>
+    public void EnterEditor()
+    {
+        if (LandingOverlay.Visibility == Visibility.Collapsed)
+        {
+            return;
+        }
+        LandingOverlay.Visibility = Visibility.Collapsed;
+        RefreshAll();
+        EditorCanvas.Invalidate();
+        EmbeddedPreview.Invalidate();
     }
 
     // ---------------------------------------------------------------- 初始化
@@ -198,7 +221,14 @@ public sealed partial class MainWindow : Window
         void Add(Windows.System.VirtualKey key, Windows.System.VirtualKeyModifiers modifiers, Action action)
         {
             var accelerator = new KeyboardAccelerator { Key = key, Modifiers = modifiers };
-            accelerator.Invoked += (_, _) => action();
+            accelerator.Invoked += (_, _) =>
+            {
+                if (LandingOverlay.Visibility == Visibility.Visible)
+                {
+                    return;
+                }
+                action();
+            };
             RootLayout.KeyboardAccelerators.Add(accelerator);
         }
 
@@ -223,6 +253,10 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void OnRootPointerWheelChanged(object sender, PointerRoutedEventArgs e)
     {
+        if (LandingOverlay.Visibility == Visibility.Visible)
+        {
+            return;
+        }
         var point = e.GetCurrentPoint(RootLayout);
         var delta = point.Properties.MouseWheelDelta;
         if (delta == 0)

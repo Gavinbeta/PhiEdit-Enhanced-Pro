@@ -51,6 +51,7 @@ public sealed class PreviewCanvas : UserControl
 
     private readonly SceneRuntime _scene = new();
     private readonly List<NoiseAreaRuntime> _noiseRuntimes = new();
+    private readonly NoiseOverlayRenderer _noiseRenderer = new();
     private ChartDocument? _noiseDocument;
     private TempoMap? _noiseTempo;
     private readonly RpeTextureRenderer _textures = new();
@@ -73,6 +74,7 @@ public sealed class PreviewCanvas : UserControl
     private string? _tempoSignature;
     private CanvasBitmap? _background;
     private string? _backgroundKey;
+    private string? _resolvedBackgroundName;
     private ChartDocument? _backgroundDocument;
     private ChartAssetStore? _backgroundAssets;
     private bool _backgroundLoading;
@@ -132,6 +134,7 @@ public sealed class PreviewCanvas : UserControl
             }
 
             _backgroundKey = null;
+            _resolvedBackgroundName = null;
             _backgroundResolved = false;
             _backgroundDocument = null;
             _backgroundAssets = null;
@@ -188,6 +191,7 @@ public sealed class PreviewCanvas : UserControl
         _textures.Reset();
         _packRenderer.Reset();
         _tintCache.Reset();
+        _noiseRenderer.Dispose();
         _fontAtlas.Reset();
         foreach (var layout in _textLayouts.Values)
         {
@@ -347,6 +351,7 @@ public sealed class PreviewCanvas : UserControl
             {
                 _background = null;
                 _backgroundKey = null;
+                _resolvedBackgroundName = null;
             }
         }
         finally
@@ -570,16 +575,24 @@ public sealed class PreviewCanvas : UserControl
             _backgroundDocument = session.Document;
             _backgroundAssets = session.Assets;
             _backgroundKey = null;
+            _resolvedBackgroundName = null;
             _backgroundResolved = false;
         }
 
+        string? backgroundName;
         if (!_backgroundResolved)
         {
-            _backgroundKey = session.Assets.FindBackground(session.Document.Background);
+            // 解析结果用独立字段，不能直接覆盖 _backgroundKey（那是已加载位图对应的 key）。
+            // 否则 EnsureBackgroundLoaded 的 name == _backgroundKey 判断永远命中，
+            // 切换谱面后新背景永远不会加载。
+            backgroundName = session.Assets.FindBackground(session.Document.Background);
+            _resolvedBackgroundName = backgroundName;
             _backgroundResolved = true;
         }
-
-        var backgroundName = _backgroundKey;
+        else
+        {
+            backgroundName = _resolvedBackgroundName;
+        }
         EnsureBackgroundLoaded(sender, backgroundName);
         using (drawing.CreateLayer(1, new Rect(viewport.Left, viewport.Top, viewport.Width, viewport.Height)))
         {
@@ -670,12 +683,12 @@ public sealed class PreviewCanvas : UserControl
             return;
         }
 
-        // 先采样当前可见的噪域；disabled 与 active 分层，挖空区域单独处理。
-        var visible = new List<(NoiseSample Sample, CanvasGeometry Geometry)>();
+        // 参考 noise-preview.mjs：lifetime 内所有噪域都参与合成（含 disabled，用 appearance 色）。
+        var visible = new List<(NoiseSample Sample, Vector2[] Points)>();
         foreach (var runtime in _noiseRuntimes)
         {
             var sample = runtime.Sample(seconds);
-            if (sample is null || sample.State == "disabled")
+            if (sample is null)
             {
                 continue;
             }
@@ -690,16 +703,7 @@ public sealed class PreviewCanvas : UserControl
                 continue;
             }
 
-            CanvasGeometry geometry;
-            try
-            {
-                geometry = CanvasGeometry.CreatePolygon(_creator!, points);
-            }
-            catch
-            {
-                continue;
-            }
-            visible.Add((sample, geometry));
+            visible.Add((sample, points));
         }
 
         if (visible.Count == 0)
@@ -707,32 +711,12 @@ public sealed class PreviewCanvas : UserControl
             return;
         }
 
-        // 参考 noise-preview.mjs：普通区域叠加半透明红，isInvert 区域从音符画面中挖空。
-        // 先绘制挖空：用噪域几何裁剪一个图层，在其上以 destination-out 语义清除已有内容不可行，
-        // 这里改用半透明深色覆盖表达挖空边界，保证布局与原版一致且不破坏音符绘制。
-        foreach (var (sample, geometry) in visible)
-        {
-            Windows.UI.Color color;
-            if (sample.IsInvert)
-            {
-                color = Windows.UI.Color.FromArgb((byte)(90 * sample.Alpha), 20, 24, 30);
-            }
-            else
-            {
-                var r = (int)(127 + (182 - 127) * sample.ActivationMix);
-                var g = (int)(35 + (60 - 35) * sample.ActivationMix);
-                var b = (int)(35 + (60 - 35) * sample.ActivationMix);
-                color = Windows.UI.Color.FromArgb((byte)(255 * sample.Alpha), (byte)r, (byte)g, (byte)b);
-            }
-
-            drawing.FillGeometry(geometry, color);
-            if (sample.ActivationMix > 0.05f)
-            {
-                using var stroke = new Microsoft.Graphics.Canvas.Brushes.CanvasSolidColorBrush(
-                    _creator!, Windows.UI.Color.FromArgb((byte)(255 * sample.ActivationMix), 255, 84, 84));
-                drawing.DrawGeometry(geometry, stroke, Math.Max(2, 5 * scale));
-            }
-        }
+        // 参考 noise-preview.mjs 的 drawLayer：先合成 coverage（普通 XOR 反色去重叠），
+        // 再把噪点材质按 coverage 裁剪后一次性绘制，避免逐个填充造成的叠加变深与接缝。
+        var canvasWidth = (float)Math.Max(1, _canvas.ActualWidth);
+        var canvasHeight = (float)Math.Max(1, _canvas.ActualHeight);
+        _noiseRenderer.Render(_creator!, _canvas.Dpi, visible, canvasWidth, canvasHeight);
+        _noiseRenderer.Draw(drawing, canvasWidth, canvasHeight);
     }
 
     private void DrawBackground(CanvasDrawingSession drawing, float width, float height, double scale)

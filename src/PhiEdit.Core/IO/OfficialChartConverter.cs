@@ -64,6 +64,9 @@ internal static class OfficialChartConverter
             warnings.Add("旧格式谱面缺少有效 bpm，已使用 120 BPM");
         }
 
+        // ChartDocument 默认带一条 120 BPM @0 的点，必须先清空，
+        // 否则与旧谱面的 baseBpm @0 重叠导致 TempoMap 拍秒换算不一致。
+        chart.BpmList.Clear();
         chart.BpmList.Add(new TempoPoint(Beat.Zero, baseBpm));
 
         // 参考 official-chart.mjs：旧格式噪域必须转换成内部 blockAreaList 并保留，

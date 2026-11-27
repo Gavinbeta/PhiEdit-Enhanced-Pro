@@ -68,7 +68,12 @@ public sealed class ChartDocument
 
                 foreach (var item in line.Events)
                 {
-                    last = Math.Max(last, item.EndBeat.Value);
+                    // 旧格式用超大 endTime（如 1e9 ticks）表示事件持续到谱面末尾，
+                    // 转换后是数千万拍的哨兵值，不能计入谱面长度，否则进度条与底栏数值爆炸。
+                    if (item.EndBeat.Value < 100_000)
+                    {
+                        last = Math.Max(last, item.EndBeat.Value);
+                    }
                 }
             }
 

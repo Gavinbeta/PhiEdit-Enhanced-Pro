@@ -65,6 +65,39 @@ public class OfficialChartImportTests
     }
 
     [Fact]
+    public void ReadWithWarnings_KeepsInfiniteEventsButLastBeatStaysFinite()
+    {
+        // 旧格式用 endTime=1e9 表示事件持续到末尾：事件必须保留，
+        // 但谱面长度不能被这个哨兵值污染，否则底栏出现百万秒/拍。
+        const string json = """
+        {
+          "formatVersion": 3,
+          "judgeLineList": [{
+            "bpm": 120,
+            "notesAbove": [{ "type": 1, "time": 3200, "positionX": 0, "holdTime": 0 }],
+            "speedEvents": [{ "startTime": 0, "endTime": 1000000000, "value": 1 }]
+          }]
+        }
+        """;
+
+        var result = RpeJson.ReadWithWarnings(json);
+        var chart = result.Chart;
+        Assert.Single(chart.Lines[0].Events);  // 哨兵事件保留
+        Assert.True(chart.LastBeat < 1000, $"LastBeat={chart.LastBeat} 不应被哨兵值污染");
+    }
+
+    [Fact]
+    public void ReadWithWarnings_HasSingleBpmPoint()
+    {
+        const string json = """
+        { "formatVersion": 3, "judgeLineList": [{ "bpm": 202, "notesAbove": [] }] }
+        """;
+        var chart = RpeJson.ReadWithWarnings(json).Chart;
+        Assert.Single(chart.BpmList);
+        Assert.Equal(202, chart.BpmList[0].Bpm, 6);
+    }
+
+    [Fact]
     public void ReadWithWarnings_SkipsUnknownNotesAndStillParsesRest()
     {
         const string json = """

@@ -28,6 +28,11 @@ public partial class App : Application
         {
             window.SetStartupBeat(beat);
         }
+        // 带启动参数（谱面文件/拍号/预览）时直接进入编辑器，避免自动化与查看流程被导航页挡住。
+        if (arguments.Length > 0)
+        {
+            window.EnterEditor();
+        }
         window.Activate();
         if (arguments.Contains("--preview") ||
             Environment.GetEnvironmentVariable("PHIEDIT_OPEN_PREVIEW") == "1")

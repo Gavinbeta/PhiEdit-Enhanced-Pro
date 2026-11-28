@@ -10,6 +10,20 @@ public partial class App : Application
     {
         InitializeComponent();
         RequestedTheme = ApplicationTheme.Dark;
+        UnhandledException += (_, e) =>
+        {
+            try
+            {
+                var log = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "PhiEditEnhancedPro", "crash.log");
+                Directory.CreateDirectory(Path.GetDirectoryName(log)!);
+                File.AppendAllText(log, $"[{DateTime.Now}] {e.Exception}\n\n");
+            }
+            catch
+            {
+                // 忽略日志写入失败。
+            }
+        };
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)

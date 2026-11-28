@@ -11,9 +11,11 @@ namespace PhiEdit.App.Views;
 /// <summary>谱面库卡片的展示模型，携带背景图与原始条目。</summary>
 public sealed class LibraryCard
 {
-    public LibraryCard(ChartLibraryItem item, string? backgroundPath)
+    public LibraryCard(ChartLibraryItem item, string? backgroundPath, double cardWidth, double cardHeight)
     {
         Item = item;
+        CardWidth = cardWidth;
+        CardHeight = cardHeight;
         Name = item.Name;
         Subtitle = item.Subtitle;
         SourceLabel = item.Source switch
@@ -36,6 +38,8 @@ public sealed class LibraryCard
     }
 
     public ChartLibraryItem Item { get; }
+    public double CardWidth { get; }
+    public double CardHeight { get; }
     public string Name { get; }
     public string Subtitle { get; }
     public string SourceLabel { get; }
@@ -75,17 +79,19 @@ public sealed partial class LandingPage : UserControl
         InitializeComponent();
         LibraryList.KeyDown += OnLibraryKeyDown;
 
-        // 读取持久化的卡片尺寸；在 ItemsSource 设置后应用。
-        var settings = Windows.Storage.ApplicationData.Current.LocalSettings;
-        var width = settings.Values.TryGetValue("LibraryCardWidth", out var value) && value is double d
-            ? d
-            : DefaultCardWidth;
-        width = Math.Clamp(width, 150, 360);
-        LibraryCardSizeSlider.Value = width;
-        LibraryList.Loaded += (_, _) => ApplyCardSize(width);
+        LibraryList.Loaded += (_, _) =>
+        {
+            LibraryCardSizeSlider.Minimum = 150;
+            LibraryCardSizeSlider.Maximum = 360;
+            LibraryCardSizeSlider.Value = DefaultCardWidth;
+            ApplyCardSize(DefaultCardWidth);
+        };
 
         Select("library");
     }
+
+    private IReadOnlyList<ChartLibraryItem> _libraryItems = Array.Empty<ChartLibraryItem>();
+    private Func<ChartLibraryItem, string?>? _backgroundResolver;
 
     private void ApplyCardSize(double width)
     {
@@ -95,19 +101,31 @@ public sealed partial class LandingPage : UserControl
             wrapGrid.ItemHeight = width * CardAspect;
         }
         LibraryCardSizeValue.Text = $"{(int)width} × {(int)(width * CardAspect)}";
+        RebuildCards(width);
+    }
+
+    private void RebuildCards(double width)
+    {
+        if (_backgroundResolver is null)
+        {
+            return;
+        }
+        _libraryCards.Clear();
+        foreach (var item in _libraryItems)
+        {
+            _libraryCards.Add(new LibraryCard(item, _backgroundResolver(item), width, width * CardAspect));
+        }
+        LibraryList.ItemsSource = _libraryCards;
+        UpdateLibrarySelectionUI();
     }
 
     /// <summary>填充谱面库列表（背景由 backgroundResolver 提供绝对路径）。</summary>
     public void SetLibraryItems(IReadOnlyList<ChartLibraryItem> items,
         Func<ChartLibraryItem, string?> backgroundResolver)
     {
-        _libraryCards.Clear();
-        foreach (var item in items)
-        {
-            _libraryCards.Add(new LibraryCard(item, backgroundResolver(item)));
-        }
-        LibraryList.ItemsSource = _libraryCards;
-        UpdateLibrarySelectionUI();
+        _libraryItems = items;
+        _backgroundResolver = backgroundResolver;
+        RebuildCards(LibraryCardSizeSlider.Value);
     }
 
     /// <summary>设置关于页与设置页显示的版本文本。</summary>
@@ -249,6 +267,15 @@ public sealed partial class LandingPage : UserControl
             : "导出选中";
     }
 
+    /// <summary>容器生成时去掉默认内边距，让卡片铺满格子（悬停阴影区域）。</summary>
+    private void OnLibraryContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+    {
+        args.ItemContainer.Padding = new Thickness(0);
+        args.ItemContainer.Margin = new Thickness(0);
+        args.ItemContainer.HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        args.ItemContainer.VerticalContentAlignment = VerticalAlignment.Stretch;
+    }
+
     private void OnLibrarySelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateLibrarySelectionUI();
 
     /// <summary>双击谱面卡片进入编辑（多选模式下不触发）。</summary>
@@ -275,9 +302,7 @@ public sealed partial class LandingPage : UserControl
 
     private void OnLibraryCardSizeChanged(object sender, RoutedEventArgs e)
     {
-        var width = LibraryCardSizeSlider.Value;
-        ApplyCardSize(width);
-        Windows.Storage.ApplicationData.Current.LocalSettings.Values["LibraryCardWidth"] = width;
+        ApplyCardSize(LibraryCardSizeSlider.Value);
     }
 
     private void OnLibraryKeyDown(object sender, KeyRoutedEventArgs e)

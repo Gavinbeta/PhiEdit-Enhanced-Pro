@@ -113,16 +113,8 @@
                     <!-- 自适应宫格：单卡固定 210×150，谱面背景铺底，随窗口宽度自动换行 -->
                     <GridView x:Name="LibraryList" Grid.Row="2" SelectionMode="Single"
                               SelectionChanged="OnLibrarySelectionChanged" DoubleTapped="OnLibraryDoubleTapped"
+                              ContainerContentChanging="OnLibraryContainerContentChanging"
                               ScrollViewer.VerticalScrollBarVisibility="Auto">
-                        <!-- 去掉 GridViewItem 默认内边距，让卡片铺满整个格子（即悬停阴影区域） -->
-                        <GridView.ItemContainerStyle>
-                            <Style TargetType="GridViewItem">
-                                <Setter Property="Padding" Value="0" />
-                                <Setter Property="Margin" Value="0" />
-                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                <Setter Property="VerticalContentAlignment" Value="Stretch" />
-                            </Style>
-                        </GridView.ItemContainerStyle>
                         <GridView.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <ItemsWrapGrid Orientation="Horizontal" ItemWidth="210" ItemHeight="150" />
@@ -224,8 +216,8 @@
                                 <TextBlock Text="调节谱面库宫格中每张卡片的尺寸（高度按比例自动计算）。"
                                            FontSize="13" TextWrapping="Wrap" Foreground="{ThemeResource TextSecondaryBrush}" />
                                 <StackPanel Orientation="Horizontal" Spacing="12">
-                                    <Slider x:Name="LibraryCardSizeSlider" Minimum="150" Maximum="360" StepFrequency="10"
-                                            Width="320" ValueChanged="OnLibraryCardSizeChanged" />
+                                    <Slider x:Name="LibraryCardSizeSlider" Width="320"
+                                            ValueChanged="OnLibraryCardSizeChanged" />
                                     <TextBlock x:Name="LibraryCardSizeValue" Text="210 × 150" FontSize="12"
                                                Foreground="{ThemeResource TextSecondaryBrush}" VerticalAlignment="Center" />
                                 </StackPanel>
@@ -242,7 +234,7 @@
                         <Border Style="{StaticResource PanelCardStyle}" x:Name="AboutSettingsCard">
                             <StackPanel Spacing="8">
                                 <TextBlock Text="关于" Style="{StaticResource SectionTitleStyle}" />
-                                <TextBlock x:Name="SettingsVersionText" Text="v1.10.0_BETA4" FontSize="13"
+                                <TextBlock x:Name="SettingsVersionText" Text="v1.10.0_BETA5" FontSize="13"
                                            Foreground="{ThemeResource TextSecondaryBrush}" />
                             </StackPanel>
                         </Border>
@@ -260,7 +252,7 @@
                     <Border Style="{StaticResource PanelCardStyle}">
                         <StackPanel Spacing="10">
                             <TextBlock Text="版本信息" Style="{StaticResource SectionTitleStyle}" />
-                            <TextBlock x:Name="AboutVersion" Text="v1.10.0_BETA4" FontSize="14"
+                            <TextBlock x:Name="AboutVersion" Text="v1.10.0_BETA5" FontSize="14"
                                        Foreground="{ThemeResource TextPrimaryBrush}" />
                             <TextBlock Text="基于 Re:PhiEdit Next 逻辑重制的原生 WinUI 3 制谱器。"
                                        FontSize="13" TextWrapping="Wrap" Foreground="{ThemeResource TextSecondaryBrush}" />

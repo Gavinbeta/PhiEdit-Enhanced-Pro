@@ -32,6 +32,9 @@ public sealed class ChartLibraryItem
 
     public string Difficulty { get; set; } = string.Empty;
 
+    /// <summary>库目录内的谱面背景图文件名（可选）。卡片用它作为背景。</summary>
+    public string BackgroundFile { get; set; } = string.Empty;
+
     public ChartLibrarySource Source { get; set; } = ChartLibrarySource.Imported;
 
     /// <summary>加入库的时间（本地日期时间字符串）。</summary>

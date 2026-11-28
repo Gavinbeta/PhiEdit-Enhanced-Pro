@@ -151,7 +151,7 @@ public sealed partial class MainWindow : Window
         Landing.LibraryImportRequested += (_, _) => _ = ImportToLibrary();
         Landing.LibraryNewRequested += (_, _) => NewChartToLibrary();
         Landing.LibraryOpenRequested += (_, item) => OpenFromLibrary(item);
-        Landing.LibraryExportRequested += (_, item) => _ = ExportFromLibrary(item);
+        Landing.LibraryExportRequested += (_, items) => _ = ExportFromLibrary(items);
 
         // 主界面只显示标题与图标，隐藏谱面信息/版本号。
         ApplyTitleBarForLanding(true);
@@ -178,7 +178,8 @@ public sealed partial class MainWindow : Window
         EmbeddedPreview.Invalidate();
     }
 
-    private void RefreshLibraryList() => Landing.SetLibraryItems(_library.Items);
+    private void RefreshLibraryList() =>
+        Landing.SetLibraryItems(_library.Items, item => _library.GetBackgroundPath(item));
 
     /// <summary>从文件导入谱面到库（复制文件副本并登记元数据）。</summary>
     private async Task ImportToLibrary()
@@ -223,24 +224,59 @@ public sealed partial class MainWindow : Window
         EnterEditor();
     }
 
-    /// <summary>导出库内谱面到用户指定位置（当前仅单条，多选导出后续实现）。</summary>
-    private async Task ExportFromLibrary(ChartLibraryItem item)
+    /// <summary>导出选中的库内谱面到用户指定文件夹（支持多选）。</summary>
+    private async Task ExportFromLibrary(IReadOnlyList<ChartLibraryItem> items)
     {
-        var picker = new FileSavePicker();
-        picker.FileTypeChoices.Add(new KeyValuePair<string, IList<string>>("谱面文件",
-            new[] { Path.GetExtension(item.FileName) }));
-        picker.SuggestedFileName = string.IsNullOrWhiteSpace(item.Name) ? "chart" : item.Name;
-        InitializeWithWindow.Initialize(picker, GetWindowHandle());
-        var file = await picker.PickSaveFileAsync();
-        if (file is null)
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        // 单条仍用文件保存对话框，可自定义文件名；多条导出到选定文件夹。
+        if (items.Count == 1)
+        {
+            var item = items[0];
+            var savePicker = new FileSavePicker();
+            savePicker.FileTypeChoices.Add(new KeyValuePair<string, IList<string>>("谱面文件",
+                new[] { Path.GetExtension(item.FileName) }));
+            savePicker.SuggestedFileName = string.IsNullOrWhiteSpace(item.Name) ? "chart" : item.Name;
+            InitializeWithWindow.Initialize(savePicker, GetWindowHandle());
+            var file = await savePicker.PickSaveFileAsync();
+            if (file is null)
+            {
+                return;
+            }
+            try
+            {
+                _library.Export(item, file.Path);
+                Landing.SettingsStatus = $"已导出：{file.Name}";
+            }
+            catch (Exception exception)
+            {
+                Landing.SettingsStatus = $"导出失败：{exception.Message}";
+            }
+            return;
+        }
+
+        var folderPicker = new FolderPicker();
+        folderPicker.FileTypeFilter.Add("*");
+        InitializeWithWindow.Initialize(folderPicker, GetWindowHandle());
+        var folder = await folderPicker.PickSingleFolderAsync();
+        if (folder is null)
         {
             return;
         }
 
         try
         {
-            _library.Export(item, file.Path);
-            Landing.SettingsStatus = $"已导出：{file.Name}";
+            var exported = 0;
+            foreach (var item in items)
+            {
+                var target = Path.Combine(folder.Path, item.FileName);
+                _library.Export(item, target);
+                exported++;
+            }
+            Landing.SettingsStatus = $"已导出 {exported} 个谱面到 {folder.Name}";
         }
         catch (Exception exception)
         {

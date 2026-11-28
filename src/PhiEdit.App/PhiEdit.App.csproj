@@ -19,12 +19,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>PhiEdit.App</RootNamespace>
     <ApplicationTitle>PhiEdit Enhanced Pro</ApplicationTitle>
-    <Version>1.10.0-BETA1</Version>
+    <Version>1.10.0-BETA4</Version>
     <AssemblyVersion>1.10.0.0</AssemblyVersion>
     <FileVersion>1.10.0.0</FileVersion>
     <!-- 高 DPI 清晰渲染：声明 PerMonitorV2 感知，避免系统位图缩放导致界面模糊 -->
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <AssemblyInformationalVersion>1.10.0_BETA1</AssemblyInformationalVersion>
+    <AssemblyInformationalVersion>1.10.0_BETA4</AssemblyInformationalVersion>
     <Company>PhiEdit Enhanced Pro</Company>
     <Description>基于 Re:PhiEdit 逻辑重制的 WinUI 3 制谱器</Description>
   </PropertyGroup>

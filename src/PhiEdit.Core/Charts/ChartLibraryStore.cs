@@ -50,6 +50,15 @@ public sealed class ChartLibraryStore
             _items = JsonSerializer.Deserialize<List<ChartLibraryItem>>(json, JsonOptions) ?? new List<ChartLibraryItem>();
             // 清理索引中已不存在文件的条目。
             _items = _items.Where(item => File.Exists(GetPath(item))).ToList();
+            // 旧索引条目可能没有背景图，从已存谱面补提取一次。
+            foreach (var item in _items)
+            {
+                if (string.IsNullOrWhiteSpace(item.BackgroundFile) && File.Exists(GetPath(item)))
+                {
+                    ReadMeta(GetPath(item), item);
+                }
+            }
+            Save();
         }
         catch
         {
@@ -175,6 +184,10 @@ public sealed class ChartLibraryStore
         try
         {
             File.Delete(GetPath(item));
+            if (!string.IsNullOrWhiteSpace(item.BackgroundFile))
+            {
+                File.Delete(Path.Combine(_chartsDirectory, item.BackgroundFile));
+            }
         }
         catch
         {
@@ -185,6 +198,10 @@ public sealed class ChartLibraryStore
 
     /// <summary>库内谱面文件的绝对路径。</summary>
     public string GetPath(ChartLibraryItem item) => Path.Combine(_chartsDirectory, item.FileName);
+
+    /// <summary>库内谱面背景图的绝对路径（无背景时返回 null）。</summary>
+    public string? GetBackgroundPath(ChartLibraryItem item) =>
+        string.IsNullOrWhiteSpace(item.BackgroundFile) ? null : Path.Combine(_chartsDirectory, item.BackgroundFile);
 
     /// <summary>导出谱面到目标路径（当前仅支持单条，多选导出后续实现）。</summary>
     public void Export(ChartLibraryItem item, string targetPath)
@@ -200,7 +217,7 @@ public sealed class ChartLibraryStore
         return storedName;
     }
 
-    private static void ReadMeta(string path, ChartLibraryItem item)
+    private void ReadMeta(string path, ChartLibraryItem item)
     {
         try
         {
@@ -229,6 +246,24 @@ public sealed class ChartLibraryStore
             item.Artist = chart.SongArtist;
             item.Charter = chart.ChartName;
             item.Difficulty = chart.Difficulty;
+
+            // 提取谱面背景图作为卡片背景，随条目一起持久化。
+            var backgroundName = assets.FindBackground(chart.Background);
+            if (backgroundName is not null)
+            {
+                var image = assets.Resolve(backgroundName);
+                if (image is not null)
+                {
+                    var imageExtension = Path.GetExtension(backgroundName);
+                    if (string.IsNullOrWhiteSpace(imageExtension))
+                    {
+                        imageExtension = ".png";
+                    }
+                    var backgroundFile = $"bg-{item.Id}{imageExtension}";
+                    File.WriteAllBytes(Path.Combine(_chartsDirectory, backgroundFile), image);
+                    item.BackgroundFile = backgroundFile;
+                }
+            }
 
             var info = assets.ReadInfo();
             if (string.IsNullOrWhiteSpace(item.Name) && info.TryGetValue("Name", out var name))
